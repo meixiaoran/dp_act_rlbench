@@ -1,0 +1,62 @@
+name: reach_target  # 任务名称，表示这是一个“到达目标”任务
+
+shape_meta: &shape_meta
+  # acceptable types: rgb, low_dim
+  # 观察数据和动作的形状和类型的描述
+  obs:  # 观察数据配置
+    wrist:
+      shape: [3,128,128]  # 图像的形状：3个颜色通道（RGB），每个通道的大小为128x128
+      type: rgb  # 图像数据类型为RGB，即包含红、绿、蓝三色通道
+
+    front:  # 机器人摄像头（眼睛）获取的图像
+      shape: [3,128,128]  # 图像的形状：3个颜色通道（RGB），每个通道的大小为128x128
+      type: rgb  # 图像数据类型为RGB
+
+    qpos:
+      shape: [8]
+      type: low_dim
+
+  action:  # 动作数据配置
+    shape: [8]  # 动作的形状：一个包含7个元素的向量，可能是机器人各个关节的控制命令
+
+task_name: &task_name close_laptop_lid  # 任务类型的名称（任务名称可以是“can”）
+dataset_type: &dataset_type ph  # 数据集类型，这里是“ph”
+dataset_path: &dataset_path data/dataset/${task.task_name}/close_laptop_lid_merged_data.hdf5 # 数据集路径，通过变量引用任务名称和数据集类型
+abs_action: &abs_action False  # 是否使用绝对动作，设置为True表示使用绝对动作
+
+env_runner:  # 环境运行器的配置
+  _target_: diffusion_policy.env_runner.robomimic_image_runner.RobomimicImageRunner  # 环境运行器类的路径
+  dataset_path: *dataset_path  # 引用上面定义的dataset_path，指定数据集路径
+  shape_meta: *shape_meta  # 引用上面定义的shape_meta，指定数据和动作的形状和类型
+  n_train: 6  # 训练时的环境数
+  n_train_vis: 2  # 训练时可视化的环境数
+  train_start_idx: 0  # 训练开始的环境索引
+  n_test: 50  # 测试时的环境数
+  n_test_vis: 4  # 测试时可视化的环境数
+  test_start_seed: 100000  # 测试时的随机种子
+  max_steps: ${eval:'500 if "${task.dataset_type}" == "mh" else 400'}  # 最大步骤数，依据数据集类型决定：如果数据集类型为“mh”，则最大步数为500，否则为400
+  n_obs_steps: ${n_obs_steps}  # 观察步骤数，变量引用
+  n_action_steps: ${n_action_steps}  # 动作步骤数，变量引用
+  fps: 10  # 渲染帧率，每秒10帧
+  crf: 22  # 编码器常数（压缩相关），通常与视频压缩有关
+  past_action: ${past_action_visible}  # 是否可见历史动作，变量引用
+  abs_action: *abs_action  # 是否使用绝对动作，引用上面定义的abs_action
+  tqdm_interval_sec: 1.0  # 每秒更新一次进度条
+  n_envs: 28  # 总环境数，表示同时运行的环境数量
+  render_obs_key: 'wrist'
+  # 评估此配置需要一个16核64GB内存的实例。
+
+dataset:  # 数据集配置
+  _target_: diffusion_policy.dataset.reach_target_dataset.reach_target_dataset  # 数据集类的路径
+  shape_meta: *shape_meta  # 引用上面定义的shape_meta，指定数据和动作的形状和类型
+  dataset_path: *dataset_path  # 引用上面定义的dataset_path，指定数据集路径
+  horizon: ${horizon}  # 任务的最大时间步数，变量引用
+  pad_before: ${eval:'${n_obs_steps}-1+${n_latency_steps}'}  # 数据集填充前的步骤数，考虑到观察步骤和延迟步骤
+  pad_after: ${eval:'${n_action_steps}-1'}  # 数据集填充后的步骤数，考虑到动作步骤
+  n_obs_steps: ${dataset_obs_steps}  # 数据集中的观察步骤数，变量引用
+  abs_action: *abs_action  # 是否使用绝对动作，引用上面定义的abs_action
+  rotation_rep: 'rotation_6d'  # 旋转表示方法，这里使用的是6D旋转表示
+  use_legacy_normalizer: False  # 是否使用旧的归一化方法，设置为False表示不使用
+  use_cache: True  # 是否使用缓存，设置为True表示使用缓存
+  seed: 42  # 数据集随机种子，确保实验的可重复性
+  val_ratio: 0.02  # 验证集的比例，2%用于验证

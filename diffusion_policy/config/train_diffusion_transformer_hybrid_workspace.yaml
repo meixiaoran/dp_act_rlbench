@@ -1,0 +1,158 @@
+defaults:
+  - _self_                     # 表示当前配置文件自身的配置为默认值。
+  - task: reach_target       # 指定任务类型为 `lift_image_abs`，这是任务名称的一部分。
+
+name: train_diffusion_transformer_hybrid
+_target_: diffusion_policy.workspace.train_diffusion_transformer_hybrid_workspace.TrainDiffusionTransformerHybridWorkspace
+                                # 指定用于训练混合扩散变换器的工作空间目标类。
+
+task_name: ${task.name}         # 任务名称，与任务定义的 `name` 变量动态关联。
+shape_meta: ${task.shape_meta}  # 模型和任务相关的形状元信息（metadata）。
+exp_name: "default"             # 实验名称，当前设置为默认值。
+
+horizon: 10                     # 时间范围长度，表示政策生成的动作序列的时间步数。
+n_obs_steps: 2                  # 输入观测步长，表示一次观测使用的时间步数。
+n_action_steps: 8               # 动作步长，表示预测的动作序列的步数。
+n_latency_steps: 0              # 延迟步长，用于处理系统延迟，当前设置为 0。
+dataset_obs_steps: ${n_obs_steps} # 数据集中观测的步长，与 `n_obs_steps` 保持一致。
+past_action_visible: False      # 是否将过去的动作对当前模型可见，当前设置为不可见。
+keypoint_visible_rate: 1.0      # 关键点的可见性比率，1.0 表示所有关键点都可见。
+obs_as_cond: True               # 是否将观测作为条件输入到模型中。
+
+policy:
+  _target_: diffusion_policy.policy.diffusion_transformer_hybrid_image_policy.DiffusionTransformerHybridImagePolicy
+                                # 使用混合扩散变换器图像策略的目标类。
+
+  shape_meta: ${shape_meta}     # 与任务相关的形状元信息（动态引用 `shape_meta`）。
+
+  noise_scheduler:             # 噪声调度器配置，用于定义扩散过程的噪声调度。
+    _target_: diffusers.schedulers.scheduling_ddpm.DDPMScheduler
+                                # 调用 `DDPMScheduler` 作为扩散模型的调度器。
+    num_train_timesteps: 100    # 训练过程中的时间步数，表示扩散过程的步长。
+    beta_start: 0.0001          # 扩散过程的初始 Beta 值，表示最小噪声强度。
+    beta_end: 0.02              # 扩散过程的结束 Beta 值，表示最大噪声强度。
+    beta_schedule: squaredcos_cap_v2
+                                # Beta 值调度方式，使用平滑的平方余弦函数（v2 版本）。
+    variance_type: fixed_small  # 方差类型，使用固定的小方差值。
+                                # 注：如果使用 `fixed_small_log`，可能导致 NaN 问题（根据 Yilun 的论文）。
+    clip_sample: True           # 是否对采样值进行裁剪，确保值在合理范围内（`predict_epsilon=False` 时必需）。
+    prediction_type: epsilon    # 预测类型，`epsilon` 表示直接预测噪声。
+
+  horizon: ${horizon}           # 时间范围长度（与全局设置一致）。
+  n_action_steps: ${eval:'${n_action_steps}+${n_latency_steps}'}
+                                # 动作步长，与动作和延迟步长动态计算。
+  n_obs_steps: ${n_obs_steps}   # 输入观测步长，与全局设置一致。
+  num_inference_steps: 100      # 推理过程中扩散步数，影响生成样本质量和计算时间。
+
+  crop_shape: [100, 100]          # 输入图像的裁剪形状，表示每个裁剪的图像为 76x76。
+  obs_encoder_group_norm: True  # 在观测编码器中是否使用分组归一化。
+  eval_fixed_crop: True         # 在评估过程中是否固定裁剪方式。
+
+  n_layer: 8                    # Transformer 的层数，表示编码器中堆叠的层数。
+  n_cond_layers: 0              # 条件层数，为 0 时使用 MLP，否则使用 Transformer 编码器。
+  n_head: 4                     # Transformer 的多头注意力机制的头数。
+  n_emb: 256                    # 嵌入向量的维度大小。
+  p_drop_emb: 0.0               # 嵌入层的丢弃概率，当前设置为 0（不丢弃）。
+  p_drop_attn: 0.3              # 注意力层的丢弃概率，用于防止过拟合。
+  causal_attn: True             # 是否使用因果注意力（仅关注先前的时间步）。
+  time_as_cond: True            # 是否将时间作为条件输入，`False` 时使用类似 BERT 的编码器架构。
+  obs_as_cond: ${obs_as_cond}   # 动态引用是否将观测作为条件输入。
+
+  # scheduler.step params
+  # predict_epsilon: True        # 是否预测 epsilon 值（扩散模型中的噪声预测方式）。
+
+ema:
+  _target_: diffusion_policy.model.diffusion.ema_model.EMAModel
+                                # 使用 `EMAModel` 类来实现指数移动平均（EMA），用于平滑模型权重。
+  update_after_step: 0            # EMA 更新的步数间隔，设置为 0 表示每个步骤都进行更新。
+  inv_gamma: 1.0                 # EMA 的衰减因子（通常为 `gamma`），`inv_gamma` 为其倒数，决定EMA更新的平滑程度。
+  power: 0.75                    # EMA 衰减的幂次，`power` 决定了EMA更新的速度（越小更新越平滑）。
+  min_value: 0.0                 # EMA 平滑的最小值，表示EMA的最小权重值。
+  max_value: 0.9999              # EMA 平滑的最大值，表示EMA的最大权重值。
+
+dataloader:
+  batch_size: 128                 # 每个训练批次的样本数，设置为64。
+  num_workers: 8                 # 数据加载时使用的工作进程数，8个工作进程可以加速数据加载。
+  shuffle: True                  # 是否对数据进行随机打乱，`True` 表示每个epoch都会打乱数据。
+  pin_memory: True               # 是否将数据加载到GPU内存中，设置为 `True` 可以加速数据加载。
+  persistent_workers: False      # 是否使用持久工作进程，`False` 表示训练期间不会保持工作进程。
+
+val_dataloader:
+  batch_size: 64                 # 每个验证批次的样本数，设置为64。
+  num_workers: 8                 # 验证时使用的工作进程数。
+  shuffle: False                 # 是否对验证数据进行打乱，通常不对验证数据打乱。
+  pin_memory: True               # 是否将验证数据加载到GPU内存中。
+  persistent_workers: False      # 是否使用持久工作进程，验证时通常不需要保持工作进程。
+
+optimizer:
+  transformer_weight_decay: 1.0e-3
+                                # Transformer 模型的权重衰减（L2正则化），设置为 1.0e-3。
+  obs_encoder_weight_decay: 1.0e-6
+                                # 观测编码器的权重衰减，设置为 1.0e-6，较小的衰减值。
+  learning_rate: 1.0e-4          # 学习率，设定为 1.0e-4。
+  betas: [0.9, 0.95]             # Adam优化器的beta值，分别控制一阶矩和二阶矩的衰减率。
+
+training:
+  device: "cuda:0"               # 训练设备为第一张GPU，`cuda:0` 表示使用设备ID为0的GPU。
+  seed: 42                       # 设置随机种子，确保实验的可复现性。
+  debug: False                   # 是否开启调试模式，`False` 表示关闭调试。
+  resume: True                    # 是否从上次中断的地方恢复训练，`True` 表示恢复。
+  # optimization
+  lr_scheduler: cosine           # 学习率调度器类型，使用余弦退火调度器（cosine decay）。
+  lr_warmup_steps: 1000           # 学习率预热步骤数，设置为1000步，逐渐增加学习率。
+  num_epochs: 15000                # 训练的总epoch数，设置为3050个训练周期。
+  gradient_accumulate_every: 1    # 每1个步数进行一次梯度累积，通常用于处理大batch训练时显存不足的情况。
+  # EMA销毁性能问题
+  use_ema: True                   # 是否使用EMA来平滑模型权重，`True`表示使用，`False`则不使用。
+  # training loop control
+  # in epochs
+  rollout_every: 50               # 每50个epoch进行一次训练过程中轨迹采样。
+  checkpoint_every: 500            # 每50个epoch保存一次模型检查点。
+  val_every: 1                    # 每1个epoch进行一次验证。
+  sample_every: 5                 # 每5个epoch进行一次样本生成。
+  # steps per epoch
+  max_train_steps: null           # 每个epoch的最大训练步数，`null`表示不限制步数。
+
+
+
+  # misc
+  tqdm_interval_sec: 1.0          # `tqdm` 进度条更新的时间间隔，单位为秒，用于控制进度条的更新频率。
+
+logging:
+  project: diffusion_policy_debug
+                                # 日志项目名称，`diffusion_policy_debug` 是当前项目名称。
+  resume: True                    # 是否恢复日志记录，`True` 表示继续记录当前日志。
+  mode: online                    # 日志记录模式，`online` 表示实时记录到日志系统。
+  name: ${now:%Y.%m.%d-%H.%M.%S}_${name}_${task_name}
+                                # 日志名称，包含当前时间戳、实验名称和任务名称。
+  tags: ["${name}", "${task_name}", "${exp_name}"]
+                                # 日志标签，包含实验名称、任务名称和实验的额外标签。
+  id: null                        # 日志的唯一标识，`null` 表示不指定ID。
+  group: null                     # 日志分组，`null` 表示不使用分组。
+
+checkpoint:
+  topk:
+    monitor_key: test_mean_score  # 在保存检查点时，使用 `test_mean_score` 作为监控的指标。
+    mode: max                     # `mode: max` 表示选取最大值来作为保存检查点的标准。
+    k: 5                          # 保留最佳的前5个检查点。
+    format_str: 'epoch={epoch:04d}-test_mean_score={test_mean_score:.3f}.ckpt'
+                                # 保存检查点的文件命名格式，包含epoch号和测试平均得分。
+  save_last_ckpt: True            # 是否保存最后一个检查点，`True` 表示保存。
+  save_last_snapshot: False       # 是否保存最后一个快照，`False` 表示不保存。
+
+multi_run:
+  run_dir: data/outputs/${now:%Y.%m.%d}/${now:%H.%M.%S}_${name}_${task_name}
+                                # 多次实验运行的存储目录，按日期和时间戳生成唯一文件夹。
+  wandb_name_base: ${now:%Y.%m.%d-%H.%M.%S}_${name}_${task_name}
+                                # 多次实验的 `wandb` 日志名称，包含日期和任务名称。
+
+hydra:
+  job:
+    override_dirname: ${name}     # Hydra任务的目录名称，设置为实验名称。
+  run:
+    dir: data/outputs/${now:%Y.%m.%d}/${now:%H.%M.%S}_${name}_${task_name}
+                                # Hydra运行的输出目录，按日期和时间戳生成。
+  sweep:
+    dir: data/outputs/${now:%Y.%m.%d}/${now:%H.%M.%S}_${name}_${task_name}
+                                # Hydra的超参数搜索（sweep）输出目录。
+    subdir: ${hydra.job.num}       # 在超参数搜索中为每个任务创建一个子目录，`hydra.job.num` 表示任务的编号。
