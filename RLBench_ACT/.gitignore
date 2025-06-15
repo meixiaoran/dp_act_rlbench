@@ -1,0 +1,10 @@
+Trainings/*
+Datasets/*
+
+.vscode/*
+.datasets/*
+.trainings/*
+
+**/__pycache__
+*.pyc
+

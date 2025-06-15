@@ -1,0 +1,10 @@
+name: dp
+channels:
+  - pytorch
+  - nvidia
+  - conda-forge
+dependencies:
+  - python=3.9
+  - pip=22.2.2
+  - numpy=1.23.3
+
