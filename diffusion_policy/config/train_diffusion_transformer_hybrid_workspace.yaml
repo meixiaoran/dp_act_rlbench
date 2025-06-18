@@ -89,7 +89,7 @@ optimizer:
                                 # Transformer 模型的权重衰减（L2正则化），设置为 1.0e-3。
   obs_encoder_weight_decay: 1.0e-6
                                 # 观测编码器的权重衰减，设置为 1.0e-6，较小的衰减值。
-  learning_rate: 1.0e-4          # 学习率，设定为 1.0e-4。
+  learning_rate: 1.0e-3          # 学习率，设定为 1.0e-4。
   betas: [0.9, 0.95]             # Adam优化器的beta值，分别控制一阶矩和二阶矩的衰减率。
 
 training:
@@ -107,7 +107,7 @@ training:
   # training loop control
   # in epochs
   rollout_every: 50               # 每50个epoch进行一次训练过程中轨迹采样。
-  checkpoint_every: 300            # 每50个epoch保存一次模型检查点。
+  checkpoint_every: 100            # 每50个epoch保存一次模型检查点。
   val_every: 5                    # 每1个epoch进行一次验证。
   sample_every: 5                 # 每5个epoch进行一次样本生成。
   # steps per epoch
