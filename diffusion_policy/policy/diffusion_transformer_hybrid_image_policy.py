@@ -3,53 +3,48 @@ import math
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from dask.array.ma import normalize_masked_array
 from einops import rearrange, reduce
 from diffusers.schedulers.scheduling_ddpm import DDPMScheduler
-
+from diffusion_policy.model.vision.multi_image_obs_encoder import MultiImageObsEncoder
 from diffusion_policy.model.common.normalizer import LinearNormalizer
 from diffusion_policy.policy.base_image_policy import BaseImagePolicy
 from diffusion_policy.model.diffusion.transformer_for_diffusion import TransformerForDiffusion
 from diffusion_policy.model.diffusion.mask_generator import LowdimMaskGenerator
-from diffusion_policy.common.robomimic_config_util import get_robomimic_config
-from robomimic.algo import algo_factory
-from robomimic.algo.algo import PolicyAlgo
-import robomimic.utils.obs_utils as ObsUtils
-import robomimic.models.base_nets as rmbn
-import diffusion_policy.model.vision.crop_randomizer as dmvc
+from diffusion_policy.model.vision.model_getter import get_resnet
+from diffusion_policy.model.diffusion.udit_models import U_DiT_DP
 from diffusion_policy.common.pytorch_util import dict_apply, replace_submodules
 
 
 class DiffusionTransformerHybridImagePolicy(BaseImagePolicy):
-    def __init__(self, 
-            shape_meta: dict,
-            noise_scheduler: DDPMScheduler,
-            # task params
-            horizon, 
-            n_action_steps, 
-            n_obs_steps,
-            num_inference_steps=None,
-            # image
-            crop_shape=(100, 100),
-            obs_encoder_group_norm=False,
-            eval_fixed_crop=False,
-            # arch
-            n_layer=8,
-            n_cond_layers=0,
-            n_head=4,
-            n_emb=256,
-            p_drop_emb=0.0,
-            p_drop_attn=0.3,
-            causal_attn=True,
-            time_as_cond=True,
-            obs_as_cond=True,
-            pred_action_steps_only=False,
-            # parameters passed to step
-            **kwargs):
+    def __init__(self,
+                 shape_meta: dict,
+                 noise_scheduler: DDPMScheduler,
+                 # task params
+                 horizon,
+                 n_action_steps,
+                 n_obs_steps,
+                 num_inference_steps=None,
+                 # image
+                 crop_shape=(100, 100),
+                 obs_encoder_group_norm=False,
+                 eval_fixed_crop=False,
+                 # arch
+                 n_layer=8,
+                 n_cond_layers=0,
+                 n_head=4,
+                 n_emb=256,
+                 p_drop_emb=0.0,
+                 p_drop_attn=0.3,
+                 causal_attn=True,
+                 time_as_cond=True,
+                 obs_as_cond=True,
+                 pred_action_steps_only=False,
+                 # parameters passed to step
+                 **kwargs):
         super().__init__()
 
         # parse shape_meta
-        action_shape = shape_meta['action']['shape']
+        action_shape = shape_meta['action']['shape']  # 8
         assert len(action_shape) == 1
         action_dim = action_shape[0]
         obs_shape_meta = shape_meta['obs']
@@ -72,93 +67,48 @@ class DiffusionTransformerHybridImagePolicy(BaseImagePolicy):
             else:
                 raise RuntimeError(f"Unsupported obs type: {type}")
 
-        # get raw robomimic config
-        config = get_robomimic_config(
-            algo_name='bc_rnn',
-            hdf5_type='image',
-            task_name='square',
-            dataset_type='ph')
-        
-        with config.unlocked():
-            # set config with shape_meta
-            config.observation.modalities.obs = obs_config
+        rgb_shape = next(iter(obs_key_shapes.items()))[1]
+        print(rgb_shape)
+        # resnet = get_resnet("resnet18", input_shape = rgb_shape)
+        resnet = get_resnet("resnet18")
+        obs_encoder = MultiImageObsEncoder(shape_meta, resnet, resize_shape = None, crop_shape = (100, 100),
+                                           random_crop= True,use_group_norm= True,
+                                           share_rgb_model = False, imagenet_norm = False)
+        # use_group_norm = True (必选)
 
-            if crop_shape is None:
-                for key, modality in config.observation.encoder.items():
-                    if modality.obs_randomizer_class == 'CropRandomizer':
-                        modality['obs_randomizer_class'] = None
-            else:
-                # set random crop parameter
-                ch, cw = crop_shape
-                for key, modality in config.observation.encoder.items():
-                    if modality.obs_randomizer_class == 'CropRandomizer':
-                        modality.obs_randomizer_kwargs.crop_height = ch
-                        modality.obs_randomizer_kwargs.crop_width = cw
-
-        # init global state
-        ObsUtils.initialize_obs_utils_with_config(config)
-
-        # load model
-        policy: PolicyAlgo = algo_factory(
-                algo_name=config.algo_name,
-                config=config,
-                obs_key_shapes=obs_key_shapes,
-                ac_dim=action_dim,
-                device='cpu',
-            )
-
-        obs_encoder = policy.nets['policy'].nets['encoder'].nets['obs']
-
-        if obs_encoder_group_norm:
-            # replace batch norm with group norm
-            replace_submodules(
-                root_module=obs_encoder,
-                predicate=lambda x: isinstance(x, nn.BatchNorm2d),
-                func=lambda x: nn.GroupNorm(
-                    num_groups=x.num_features//16, 
-                    num_channels=x.num_features)
-            )
-            # obs_encoder.obs_nets['agentview_image'].nets[0].nets
-        
-        # obs_encoder.obs_randomizers['agentview_image']
-        if eval_fixed_crop:
-            replace_submodules(
-                root_module=obs_encoder,
-                predicate=lambda x: isinstance(x, rmbn.CropRandomizer),
-                func=lambda x: dmvc.CropRandomizer(
-                    input_shape=x.input_shape,
-                    crop_height=x.crop_height,
-                    crop_width=x.crop_width,
-                    num_crops=x.num_crops,
-                    pos_enc=x.pos_enc
-                )
-            )
+        obs_feature_dim = obs_encoder.output_shape()[0]
+        print("obs_feature_dim" + str(obs_feature_dim))
 
         # create diffusion model
-        obs_feature_dim = obs_encoder.output_shape()[0]
+        obs_feature_dim = obs_feature_dim
         input_dim = action_dim if obs_as_cond else (obs_feature_dim + action_dim)
         output_dim = input_dim
         cond_dim = obs_feature_dim if obs_as_cond else 0
 
-        model = TransformerForDiffusion(
-            input_dim=input_dim,
-            output_dim=output_dim,
-            horizon=horizon,
-            n_obs_steps=n_obs_steps,
-            cond_dim=cond_dim,
-            n_layer=n_layer,
-            n_head=n_head,
-            n_emb=n_emb,
-            p_drop_emb=p_drop_emb,
-            p_drop_attn=p_drop_attn,
-            causal_attn=causal_attn,
-            time_as_cond=time_as_cond,
-            obs_as_cond=obs_as_cond,
-            n_cond_layers=n_cond_layers
-        )
+        # model = TransformerForDiffusion(
+        #     input_dim=input_dim,  # 8
+        #     output_dim=output_dim,
+        #     horizon=horizon,
+        #     n_obs_steps=n_obs_steps,
+        #     cond_dim=cond_dim,
+        #     n_layer=n_layer,
+        #     n_head=n_head,
+        #     n_emb=n_emb,
+        #     p_drop_emb=p_drop_emb,
+        #     p_drop_attn=p_drop_attn,
+        #     causal_attn=causal_attn,
+        #     time_as_cond=time_as_cond,
+        #     obs_as_cond=obs_as_cond,
+        #     n_cond_layers=n_cond_layers
+        # )
+        model = U_DiT_DP(cond_dim*2)
+        self.model = nn.ModuleDict({
+            'obs_encoder': obs_encoder,
+            'model': model
+        })
 
-        self.obs_encoder = obs_encoder
-        self.model = model
+        # self.obs_encoder = obs_encoder
+        # self.model = model
         self.noise_scheduler = noise_scheduler
         self.mask_generator = LowdimMaskGenerator(
             action_dim=action_dim,
@@ -180,49 +130,44 @@ class DiffusionTransformerHybridImagePolicy(BaseImagePolicy):
         if num_inference_steps is None:
             num_inference_steps = noise_scheduler.config.num_train_timesteps
         self.num_inference_steps = num_inference_steps
-    
+
+        print("Diffusion params: %e" % sum(p.numel() for p in self.model['model'].parameters()))
+        print("Vision params: %e" % sum(p.numel() for p in self.model['obs_encoder'].parameters()))
+
     # ========= inference  ============
     def conditional_sample(self,
                            condition_data, condition_mask,
                            cond=None, generator=None,
-                           # 调度器 step 所需的其他关键字参数
+                           # keyword arguments to scheduler.step
                            **kwargs
                            ):
-        # 获取模型和调度器
-        model = self.model  # 这是用于生成样本的深度学习模型（如扩散模型）
-        scheduler = self.noise_scheduler  # 噪声调度器，用于控制去噪过程中的时间步
+        model = self.model
+        scheduler = self.noise_scheduler
 
-        # 1. 初始化一个与条件数据大小相同的噪声轨迹（初始为随机噪声）
         trajectory = torch.randn(
-            size=condition_data.shape,  # 轨迹的大小与条件数据相同
-            dtype=condition_data.dtype,  # 轨迹的数据类型与条件数据一致
-            device=condition_data.device,  # 轨迹所在的设备与条件数据相同
-            generator=generator)  # 可选的随机数生成器，用于生成确定性噪声
+            size=condition_data.shape,
+            dtype=condition_data.dtype,
+            device=condition_data.device,
+            generator=generator)
 
-        # 2. 设置扩散模型的推理步骤
-        scheduler.set_timesteps(self.num_inference_steps)  # 设置扩散过程的时间步数（即推理的步骤数）
+        # set step values
+        scheduler.set_timesteps(self.num_inference_steps)
 
-        # 3. 遍历所有的时间步
         for t in scheduler.timesteps:
-            # 3.1 应用条件：确保在当前步骤中，`condition_mask` 为 True 的位置，保持条件数据
+            # 1. apply conditioning
             trajectory[condition_mask] = condition_data[condition_mask]
-
-            # 3.2 使用模型预测输出：模型在当前的噪声轨迹 `trajectory` 和时间步 `t` 上进行推理
-            model_output = model(trajectory, t, cond)  # `model_output` 是模型对噪声图像的预测，通常是噪声残差
-
-            # 3.3 使用调度器计算上一个图像：从当前的图像（`trajectory`）推算出上一时刻的图像
+            # 2. predict model output
+            model_output = model['model'](trajectory, t, cond)
+            # 3. compute previous image: x_t -> x_t-1
             trajectory = scheduler.step(
-                model_output,  # 模型的预测输出（噪声残差）
-                t,  # 当前时间步
-                trajectory,  # 当前的噪声图像（即`trajectory`）
-                generator=generator,  # 可选的随机数生成器
-                **kwargs  # 调度器需要的其他参数，如学习率、温度等
-            ).prev_sample  # 调度器返回上一步生成的样本（即去噪后的样本）
+                model_output, t, trajectory,
+                generator=generator,
+                **kwargs
+            ).prev_sample
 
-        # 4. 最后一步，确保条件强制执行：在最终结果中，`condition_mask` 为 True 的位置，确保恢复为条件数据
+        # finally make sure conditioning is enforced
         trajectory[condition_mask] = condition_data[condition_mask]
 
-        # 5. 返回生成的最终样本（去噪后的图像）
         return trajectory
 
     def predict_action(self, obs_dict: Dict[str, torch.Tensor]) -> Dict[str, torch.Tensor]:
@@ -230,11 +175,9 @@ class DiffusionTransformerHybridImagePolicy(BaseImagePolicy):
         obs_dict: must include "obs" key
         result: must include "action" key
         """
-        assert 'past_action' not in obs_dict # not implemented yet
+        assert 'past_action' not in obs_dict  # not implemented yet
         # normalize input
-
         nobs = self.normalizer.normalize(obs_dict)
-
         value = next(iter(nobs.values()))
         B, To = value.shape[:2]
         T = self.horizon
@@ -251,8 +194,8 @@ class DiffusionTransformerHybridImagePolicy(BaseImagePolicy):
         cond_data = None
         cond_mask = None
         if self.obs_as_cond:
-            this_nobs = dict_apply(nobs, lambda x: x[:,:To,...].reshape(-1,*x.shape[2:]))
-            nobs_features = self.obs_encoder(this_nobs)
+            this_nobs = dict_apply(nobs, lambda x: x[:, :To, ...].reshape(-1, *x.shape[2:]))
+            nobs_features = self.model['obs_encoder'](this_nobs)
             # reshape back to B, To, Do
             cond = nobs_features.reshape(B, To, -1)
             shape = (B, T, Da)
@@ -262,15 +205,15 @@ class DiffusionTransformerHybridImagePolicy(BaseImagePolicy):
             cond_mask = torch.zeros_like(cond_data, dtype=torch.bool)
         else:
             # condition through impainting
-            this_nobs = dict_apply(nobs, lambda x: x[:,:To,...].reshape(-1,*x.shape[2:]))
-            nobs_features = self.obs_encoder(this_nobs)
+            this_nobs = dict_apply(nobs, lambda x: x[:, :To, ...].reshape(-1, *x.shape[2:]))
+            nobs_features = self.model['obs_encoder'](this_nobs)
             # reshape back to B, To, Do
             nobs_features = nobs_features.reshape(B, To, -1)
-            shape = (B, T, Da+Do)
+            shape = (B, T, Da + Do)
             cond_data = torch.zeros(size=shape, device=device, dtype=dtype)
             cond_mask = torch.zeros_like(cond_data, dtype=torch.bool)
-            cond_data[:,:To,Da:] = nobs_features
-            cond_mask[:,:To,Da:] = True
+            cond_data[:, :To, Da:] = nobs_features
+            cond_mask[:, :To, Da:] = True
 
         # run sampling
         nsample = self.conditional_sample(
@@ -280,11 +223,8 @@ class DiffusionTransformerHybridImagePolicy(BaseImagePolicy):
             **self.kwargs)
 
         # unnormalize prediction
-        naction_pred = nsample[...,:Da]
-        # print("naction_pred", naction_pred)
+        naction_pred = nsample[..., :Da]
         action_pred = self.normalizer['action'].unnormalize(naction_pred)
-        # print("action_pred", action_pred)
-
 
         # get action
         if self.pred_action_steps_only:
@@ -292,7 +232,7 @@ class DiffusionTransformerHybridImagePolicy(BaseImagePolicy):
         else:
             start = To - 1
             end = start + self.n_action_steps
-            action = action_pred[:,start:end]
+            action = action_pred[:, start:end]
 
         result = {
             'action': action,
@@ -305,16 +245,16 @@ class DiffusionTransformerHybridImagePolicy(BaseImagePolicy):
         self.normalizer.load_state_dict(normalizer.state_dict())
 
     def get_optimizer(
-            self, 
-            transformer_weight_decay: float, 
+            self,
+            transformer_weight_decay: float,
             obs_encoder_weight_decay: float,
-            learning_rate: float, 
+            learning_rate: float,
             betas: Tuple[float, float]
-        ) -> torch.optim.Optimizer:
-        optim_groups = self.model.get_optim_groups(
+    ) -> torch.optim.Optimizer:
+        optim_groups = self.model['model'].get_optim_groups(
             weight_decay=transformer_weight_decay)
         optim_groups.append({
-            "params": self.obs_encoder.parameters(),
+            "params": self.model['obs_encoder'].parameters(),
             "weight_decay": obs_encoder_weight_decay
         })
         optimizer = torch.optim.AdamW(
@@ -325,12 +265,8 @@ class DiffusionTransformerHybridImagePolicy(BaseImagePolicy):
     def compute_loss(self, batch):
         # normalize input
         assert 'valid_mask' not in batch
-
         nobs = self.normalizer.normalize(batch['obs'])
-
         nactions = self.normalizer['action'].normalize(batch['action'])
-
-
         batch_size = nactions.shape[0]
         horizon = nactions.shape[1]
         To = self.n_obs_steps
@@ -338,26 +274,21 @@ class DiffusionTransformerHybridImagePolicy(BaseImagePolicy):
         # handle different ways of passing observation
         cond = None
         trajectory = nactions
-
-
         if self.obs_as_cond:
             # reshape B, T, ... to B*T
-            this_nobs = dict_apply(nobs, 
-                lambda x: x[:,:To,...].reshape(-1,*x.shape[2:]))
-            # for key, value in this_nobs.items():
-            #     print(f"Key: {key}, Shape: {value.shape}")
-
-            nobs_features = self.obs_encoder(this_nobs)
+            this_nobs = dict_apply(nobs,
+                                   lambda x: x[:, :To, ...].reshape(-1, *x.shape[2:]))
+            nobs_features = self.model['obs_encoder'](this_nobs)
             # reshape back to B, T, Do
             cond = nobs_features.reshape(batch_size, To, -1)
             if self.pred_action_steps_only:
                 start = To - 1
                 end = start + self.n_action_steps
-                trajectory = nactions[:,start:end]
+                trajectory = nactions[:, start:end]
         else:
             # reshape B, T, ... to B*T
             this_nobs = dict_apply(nobs, lambda x: x.reshape(-1, *x.shape[2:]))
-            nobs_features = self.obs_encoder(this_nobs)
+            nobs_features = self.model['obs_encoder'](this_nobs)
             # reshape back to B, T, Do
             nobs_features = nobs_features.reshape(batch_size, horizon, -1)
             trajectory = torch.cat([nactions, nobs_features], dim=-1).detach()
@@ -370,11 +301,10 @@ class DiffusionTransformerHybridImagePolicy(BaseImagePolicy):
 
         # Sample noise that we'll add to the images
         noise = torch.randn(trajectory.shape, device=trajectory.device)
-
         bsz = trajectory.shape[0]
         # Sample a random timestep for each image
         timesteps = torch.randint(
-            0, self.noise_scheduler.config.num_train_timesteps, 
+            0, self.noise_scheduler.config.num_train_timesteps,
             (bsz,), device=trajectory.device
         ).long()
         # Add noise to the clean images according to the noise magnitude at each timestep
@@ -384,17 +314,13 @@ class DiffusionTransformerHybridImagePolicy(BaseImagePolicy):
 
         # compute loss mask
         loss_mask = ~condition_mask
-        # print("loss_mask", loss_mask)
 
         # apply conditioning
         noisy_trajectory[condition_mask] = trajectory[condition_mask]
-        
+
         # Predict the noise residual
-
-        pred = self.model(noisy_trajectory, timesteps, cond)
-
+        pred = self.model['model'](noisy_trajectory, timesteps, cond)
         pred_type = self.noise_scheduler.config.prediction_type
-
         if pred_type == 'epsilon':
             target = noise
         elif pred_type == 'sample':

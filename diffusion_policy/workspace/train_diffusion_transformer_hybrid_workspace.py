@@ -42,7 +42,7 @@ class TrainDiffusionTransformerHybridWorkspace(BaseWorkspace):
         torch.manual_seed(seed)  # 设置 PyTorch 的随机种子
         np.random.seed(seed)  # 设置 NumPy 的随机种子
         random.seed(seed)  # 设置 Python 内建的 random 模块的随机种子
-
+        
         # 配置模型
         self.model: DiffusionTransformerHybridImagePolicy = hydra.utils.instantiate(cfg.policy)  # 使用 Hydra 实例化模型（根据配置文件）
 

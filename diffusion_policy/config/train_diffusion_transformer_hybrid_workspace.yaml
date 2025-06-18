@@ -10,9 +10,9 @@ task_name: ${task.name}         # 任务名称，与任务定义的 `name` 变�
 shape_meta: ${task.shape_meta}  # 模型和任务相关的形状元信息（metadata）。
 exp_name: "default"             # 实验名称，当前设置为默认值。
 
-horizon: 10                     # 时间范围长度，表示政策生成的动作序列的时间步数。
+horizon: 8                     # 时间范围长度，表示政策生成的动作序列的时间步数。
 n_obs_steps: 2                  # 输入观测步长，表示一次观测使用的时间步数。
-n_action_steps: 8               # 动作步长，表示预测的动作序列的步数。
+n_action_steps: 6               # 动作步长，表示预测的动作序列的步数。
 n_latency_steps: 0              # 延迟步长，用于处理系统延迟，当前设置为 0。
 dataset_obs_steps: ${n_obs_steps} # 数据集中观测的步长，与 `n_obs_steps` 保持一致。
 past_action_visible: False      # 是否将过去的动作对当前模型可见，当前设置为不可见。
@@ -89,6 +89,8 @@ optimizer:
                                 # Transformer 模型的权重衰减（L2正则化），设置为 1.0e-3。
   obs_encoder_weight_decay: 1.0e-6
                                 # 观测编码器的权重衰减，设置为 1.0e-6，较小的衰减值。
+  # state_weight_decay: 1.0e-6
+  #                               # 关节位置（qpos）的权重衰减，设置为 1.0e-6，较小的衰减值。
   learning_rate: 1.0e-4          # 学习率，设定为 1.0e-4。
   betas: [0.9, 0.95]             # Adam优化器的beta值，分别控制一阶矩和二阶矩的衰减率。
 
