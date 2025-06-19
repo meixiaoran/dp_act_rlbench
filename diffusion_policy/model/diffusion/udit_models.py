@@ -673,6 +673,11 @@ class U_DiT(nn.Module):
 
         down_factor = down_factor if isinstance(down_factor, list) else [down_factor] * 5
 
+        self.multihead_attn = torch.nn.MultiheadAttention(embed_dim=256, num_heads=8)
+        self.state_action_projecton = nn.Linear(8, 256)
+        self.state_action_projecton_2 = nn.Linear(8, 256)
+        self.state_action_projecton_3 = nn.Linear(256, 8)
+
         self.x_embedder = OverlapPatchEmbed(in_channels, hidden_size, bias=True)
         self.t_embedder_1 = TimestepEmbedder(hidden_size)
         self.global_cond_projection_1 = nn.Linear(global_cond_dim, hidden_size) # ----此处用线性层还是卷积有待商榷
@@ -791,7 +796,7 @@ class U_DiT(nn.Module):
         # separate out all parameters to those that will and won't experience regularizing weight decay
         decay = set()
         no_decay = set()
-        whitelist_weight_modules = (torch.nn.Linear, Attention)
+        whitelist_weight_modules = (torch.nn.Linear, Attention, torch.nn.MultiheadAttention)
         blacklist_weight_modules = (torch.nn.LayerNorm, torch.nn.Embedding, torch.nn.Conv1d,nn.ConvTranspose1d)
         for mn, m in self.named_modules():
             for pn, p in m.named_parameters():
@@ -851,7 +856,8 @@ class U_DiT(nn.Module):
     def forward(self,
             sample: torch.Tensor,
             timestep: Union[torch.Tensor, float, int],
-            c=None, **kwargs):
+            c=None,
+            state_pred_action=None, **kwargs):
         """
         Forward pass of U-DiT.
         x: (N, C, H, W) tensor of spatial inputs (images or latent representations of images)
@@ -929,7 +935,10 @@ class U_DiT(nn.Module):
         x = self.final_layer(x, c2)  # (N, T, patch_size ** 2 * out_channels)
 
         x = einops.rearrange(x, 'b t h -> b h t')
-
+        state_action = self.state_action_projecton(state_pred_action)
+        state_action_2 = self.state_action_projecton_2(x)
+        attn_output, attn_output_weights = self.multihead_attn(state_action_2, state_action, state_action)
+        x = self.state_action_projecton_3(attn_output)
         return x
 
     def forward_with_cfg(self, x, t, y, cfg_scale):

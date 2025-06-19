@@ -256,23 +256,23 @@ class TrainDiffusionTransformerHybridWorkspace(BaseWorkspace):
                 # step_log.update(runner_log)
 
                 # 如果当前 epoch 需要进行验证
-                if (self.epoch % cfg.training.val_every) == 0:
-                    with torch.no_grad():  # 在验证过程中禁用梯度计算，以节省内存
-                        val_losses = list()  # 用于存储验证损失
-                        # 使用 tqdm 显示验证过程的进度条
-                        with tqdm.tqdm(val_dataloader, desc=f"Validation epoch {self.epoch}",
-                                       leave=False, mininterval=cfg.training.tqdm_interval_sec) as tepoch:
-                            for batch_idx, batch in enumerate(tepoch):
-                                batch = dict_apply(batch, lambda x: x.to(device, non_blocking=True))  # 将验证数据转移到设备上
-                                loss = self.model.compute_loss(batch)  # 计算验证损失
-                                val_losses.append(loss)  # 添加到验证损失列表中
-                                if (cfg.training.max_val_steps is not None) and batch_idx >= (
-                                        cfg.training.max_val_steps - 1):
-                                    break
-                        if len(val_losses) > 0:  # 如果存在验证损失
-                            val_loss = torch.mean(torch.tensor(val_losses)).item()  # 计算验证损失的平均值
-                            # 更新当前步骤的日志信息，记录验证损失
-                            step_log['val_loss'] = val_loss
+                # if (self.epoch % cfg.training.val_every) == 0:
+                #     with torch.no_grad():  # 在验证过程中禁用梯度计算，以节省内存
+                #         val_losses = list()  # 用于存储验证损失
+                #         # 使用 tqdm 显示验证过程的进度条
+                #         with tqdm.tqdm(val_dataloader, desc=f"Validation epoch {self.epoch}",
+                #                        leave=False, mininterval=cfg.training.tqdm_interval_sec) as tepoch:
+                #             for batch_idx, batch in enumerate(tepoch):
+                #                 batch = dict_apply(batch, lambda x: x.to(device, non_blocking=True))  # 将验证数据转移到设备上
+                #                 loss = self.model.compute_loss(batch)  # 计算验证损失
+                #                 val_losses.append(loss)  # 添加到验证损失列表中
+                #                 if (cfg.training.max_val_steps is not None) and batch_idx >= (
+                #                         cfg.training.max_val_steps - 1):
+                #                     break
+                #         if len(val_losses) > 0:  # 如果存在验证损失
+                #             val_loss = torch.mean(torch.tensor(val_losses)).item()  # 计算验证损失的平均值
+                #             # 更新当前步骤的日志信息，记录验证损失
+                #             step_log['val_loss'] = val_loss
 
 
                 # ========= 保存检查点 ==========

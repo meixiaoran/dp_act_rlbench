@@ -13,7 +13,7 @@ from diffusion_policy.model.diffusion.mask_generator import LowdimMaskGenerator
 from diffusion_policy.model.vision.model_getter import get_resnet
 from diffusion_policy.model.diffusion.udit_models import U_DiT_DP
 from diffusion_policy.common.pytorch_util import dict_apply, replace_submodules
-
+from diffusion_policy.model.state.NLiear import NLinear
 
 class DiffusionTransformerHybridImagePolicy(BaseImagePolicy):
     def __init__(self,
@@ -101,10 +101,12 @@ class DiffusionTransformerHybridImagePolicy(BaseImagePolicy):
         #     obs_as_cond=obs_as_cond,
         #     n_cond_layers=n_cond_layers
         # )
+        state_model = NLinear(seq_len=n_obs_steps, pred_len=horizon, enc_in=8)
         model = U_DiT_DP(cond_dim*2)
         self.model = nn.ModuleDict({
             'obs_encoder': obs_encoder,
-            'model': model
+            'model': model,
+            "state_model": state_model
         })
 
         # self.obs_encoder = obs_encoder
@@ -248,6 +250,7 @@ class DiffusionTransformerHybridImagePolicy(BaseImagePolicy):
             self,
             transformer_weight_decay: float,
             obs_encoder_weight_decay: float,
+            state_weight_decay: float,
             learning_rate: float,
             betas: Tuple[float, float]
     ) -> torch.optim.Optimizer:
@@ -255,8 +258,11 @@ class DiffusionTransformerHybridImagePolicy(BaseImagePolicy):
             weight_decay=transformer_weight_decay)
         optim_groups.append({
             "params": self.model['obs_encoder'].parameters(),
-            "weight_decay": obs_encoder_weight_decay
-        })
+            "weight_decay": obs_encoder_weight_decay})
+        optim_groups.append({
+            "params": self.model['state_model'].parameters(),
+            "weight_decay": state_weight_decay})
+        
         optimizer = torch.optim.AdamW(
             optim_groups, lr=learning_rate, betas=betas
         )
@@ -265,6 +271,9 @@ class DiffusionTransformerHybridImagePolicy(BaseImagePolicy):
     def compute_loss(self, batch):
         # normalize input
         assert 'valid_mask' not in batch
+        qpos = batch['obs']['qpos']
+        state_pred_action = self.model['state_model'](qpos)
+
         nobs = self.normalizer.normalize(batch['obs'])
         nactions = self.normalizer['action'].normalize(batch['action'])
         batch_size = nactions.shape[0]
@@ -319,7 +328,7 @@ class DiffusionTransformerHybridImagePolicy(BaseImagePolicy):
         noisy_trajectory[condition_mask] = trajectory[condition_mask]
 
         # Predict the noise residual
-        pred = self.model['model'](noisy_trajectory, timesteps, cond)
+        pred = self.model['model'](noisy_trajectory, timesteps, cond, state_pred_action)
         pred_type = self.noise_scheduler.config.prediction_type
         if pred_type == 'epsilon':
             target = noise
@@ -327,6 +336,7 @@ class DiffusionTransformerHybridImagePolicy(BaseImagePolicy):
             target = trajectory
         else:
             raise ValueError(f"Unsupported prediction type {pred_type}")
+
 
         loss = F.mse_loss(pred, target, reduction='none')
         loss = loss * loss_mask.type(loss.dtype)

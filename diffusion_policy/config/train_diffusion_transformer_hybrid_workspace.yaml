@@ -72,7 +72,7 @@ ema:
 
 dataloader:
   batch_size: 64                 # 每个训练批次的样本数，设置为64。
-  num_workers: 8                 # 数据加载时使用的工作进程数，8个工作进程可以加速数据加载。
+  num_workers: 4                 # 数据加载时使用的工作进程数，8个工作进程可以加速数据加载。
   shuffle: True                  # 是否对数据进行随机打乱，`True` 表示每个epoch都会打乱数据。
   pin_memory: True               # 是否将数据加载到GPU内存中，设置为 `True` 可以加速数据加载。
   persistent_workers: False      # 是否使用持久工作进程，`False` 表示训练期间不会保持工作进程。
@@ -89,7 +89,7 @@ optimizer:
                                 # Transformer 模型的权重衰减（L2正则化），设置为 1.0e-3。
   obs_encoder_weight_decay: 1.0e-6
                                 # 观测编码器的权重衰减，设置为 1.0e-6，较小的衰减值。
-  # state_weight_decay: 1.0e-6
+  state_weight_decay: 1.0e-7
   #                               # 关节位置（qpos）的权重衰减，设置为 1.0e-6，较小的衰减值。
   learning_rate: 1.0e-4          # 学习率，设定为 1.0e-4。
   betas: [0.9, 0.95]             # Adam优化器的beta值，分别控制一阶矩和二阶矩的衰减率。
