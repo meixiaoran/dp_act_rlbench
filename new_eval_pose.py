@@ -22,7 +22,7 @@ from diffusion_policy.real_world.real_inference_util import (
     get_real_obs_resolution,
     get_real_obs_dict)
 
-from RLBench.rlbench.const import SUPPORTED_ROBOTS
+from RLBench_ACT.RLBench.rlbench.const import SUPPORTED_ROBOTS
 
 import numpy as np
 from scipy.spatial.transform import Rotation
@@ -270,7 +270,7 @@ def main(checkpoint, ckpt_name0, device, task_name, robot_name, epochs=50, onscr
                 # `numpy()` 用于转换为 NumPy 数组，方便后续处理。
                 # print(action)
                 # print(action)
-                for i in range(10):
+                for i in range(8):
                     action_first_six = action[i]
 
                     quaternion_raw = action_first_six[3:7]
@@ -370,8 +370,8 @@ if __name__ == '__main__':
     import argparse
 
     parser = argparse.ArgumentParser(description="Run diffusion policy with command-line arguments.")
-    parser.add_argument('--checkpoint', type=str, required=True, default='/home/mar/diffusion_policy/data/pcik_up_cup_1800_dp-t.ckpt ')
-    parser.add_argument('--task_name', type=str, required=True, default='pick_up_cup')
+    parser.add_argument('--checkpoint', type=str, default='/home/mar/dp_act_rlbench/data/outputs/2025.07.17/11.53.42_train_diffusion_transformer_hybrid_reach_target/checkpoints/300.ckpt')
+    parser.add_argument('--task_name', type=str, default='pick_up_cup')
 
     # 也可以为其他参数添加默认值
     parser.add_argument('--ckpt_name0', type=str, default='latest.ckpt')

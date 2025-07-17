@@ -21,7 +21,7 @@ shape_meta: &shape_meta
 
 task_name: &task_name reach_target  # 任务类型的名称（任务名称可以是“can”）
 dataset_type: &dataset_type ph  # 数据集类型，这里是“ph”
-dataset_path: &dataset_path /home/mar/diffusion_policy/data/dataset/pick_up_cup_merged_data.hdf5  # 数据集路径，通过变量引用任务名称和数据集类型
+dataset_path: &dataset_path /home/mar/dataset/pick_up_cup_merged_data.hdf5  # 数据集路径，通过变量引用任务名称和数据集类型
 abs_action: &abs_action False  # 是否使用绝对动作，设置为True表示使用绝对动作
 
 env_runner:  # 环境运行器的配置
