@@ -12,6 +12,7 @@ from diffusion_policy.model.diffusion.transformer_for_diffusion import Transform
 from diffusion_policy.model.diffusion.mask_generator import LowdimMaskGenerator
 from diffusion_policy.model.vision.model_getter import get_resnet
 from diffusion_policy.model.diffusion.udit_models import U_DiT_DP
+from diffusion_policy.model.diffusion.dic_models import DiC_S
 from diffusion_policy.common.pytorch_util import dict_apply, replace_submodules
 
 
@@ -101,7 +102,7 @@ class DiffusionTransformerHybridImagePolicy(BaseImagePolicy):
         #     obs_as_cond=obs_as_cond,
         #     n_cond_layers=n_cond_layers
         # )
-        model = U_DiT_DP(cond_dim*2)
+        model = DiC_S()
         self.model = nn.ModuleDict({
             'obs_encoder': obs_encoder,
             'model': model
@@ -244,23 +245,23 @@ class DiffusionTransformerHybridImagePolicy(BaseImagePolicy):
     def set_normalizer(self, normalizer: LinearNormalizer):
         self.normalizer.load_state_dict(normalizer.state_dict())
 
-    def get_optimizer(
-            self,
-            transformer_weight_decay: float,
-            obs_encoder_weight_decay: float,
-            learning_rate: float,
-            betas: Tuple[float, float]
-    ) -> torch.optim.Optimizer:
-        optim_groups = self.model['model'].get_optim_groups(
-            weight_decay=transformer_weight_decay)
-        optim_groups.append({
-            "params": self.model['obs_encoder'].parameters(),
-            "weight_decay": obs_encoder_weight_decay
-        })
-        optimizer = torch.optim.AdamW(
-            optim_groups, lr=learning_rate, betas=betas
-        )
-        return optimizer
+    # def get_optimizer(
+    #         self,
+    #         transformer_weight_decay: float,
+    #         obs_encoder_weight_decay: float,
+    #         learning_rate: float,
+    #         betas: Tuple[float, float]
+    # ) -> torch.optim.Optimizer:
+    #     optim_groups = self.model['model'].get_optim_groups(
+    #         weight_decay=transformer_weight_decay)
+    #     optim_groups.append({
+    #         "params": self.model['obs_encoder'].parameters(),
+    #         "weight_decay": obs_encoder_weight_decay
+    #     })
+    #     optimizer = torch.optim.AdamW(
+    #         optim_groups, lr=learning_rate, betas=betas
+    #     )
+    #     return optimizer
 
     def compute_loss(self, batch):
         # normalize input

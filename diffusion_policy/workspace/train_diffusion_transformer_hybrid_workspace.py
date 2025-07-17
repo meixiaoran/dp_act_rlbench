@@ -51,7 +51,7 @@ class TrainDiffusionTransformerHybridWorkspace(BaseWorkspace):
             self.ema_model = copy.deepcopy(self.model)  # 通过深拷贝将模型的参数复制到 ema_model
 
         # 配置优化器
-        self.optimizer = self.model.get_optimizer(**cfg.optimizer)  # 获取优化器，通常是基于配置中的优化器类型和参数
+        self.optimizer = torch.optim.AdamW(self.model.parameters(), lr=1e-4, weight_decay=1e-3, betas=(0.9, 0.95)) # 获取优化器，通常是基于配置中的优化器类型和参数
 
         # 配置训练状态（用于跟踪训练进度）
         self.global_step = 0  # 初始化全局步骤（每处理一个批次时增加）
