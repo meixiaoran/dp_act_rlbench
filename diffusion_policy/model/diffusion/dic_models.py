@@ -162,7 +162,6 @@ class LabelEmbedder(nn.Module):
     def __init__(self, num_classes, hidden_size, dropout_prob):
         super().__init__()
         use_cfg_embedding = dropout_prob > 0
-        self.project = nn.Linear(2064, num_classes + use_cfg_embedding)
         self.embedding_table = nn.Embedding(num_classes + use_cfg_embedding, hidden_size)
         self.num_classes = num_classes
         self.dropout_prob = dropout_prob
@@ -175,14 +174,13 @@ class LabelEmbedder(nn.Module):
             drop_ids = torch.rand(labels.shape[0], device=labels.device) < self.dropout_prob
         else:
             drop_ids = force_drop_ids == 1
-        
+        labels = torch.where(drop_ids, self.num_classes, labels)
         return labels
 
     def forward(self, labels, train, force_drop_ids=None):
         use_dropout = self.dropout_prob > 0
         if (train and use_dropout) or (force_drop_ids is not None):
             labels = self.token_drop(labels, force_drop_ids)
-        labels = self.project(labels)
         embeddings = self.embedding_table(labels)
         return embeddings, labels
 
@@ -344,7 +342,7 @@ class DiC(nn.Module):
     def __init__(
         self,
         input_size=32,
-        in_channels=3,
+        in_channels=1,
         hidden_size=1152,
         depth=[2*2,5*2,8*2,5*2,2*2],
         num_heads=16,
@@ -380,6 +378,7 @@ class DiC(nn.Module):
         elif len(mult_channels) == 4:
             mult_channels = mult_channels + mult_channels[:-1][::-1]
 
+
         self.x_embedder = OverlapPatchEmbed(in_channels, hidden_size*mult_channels[0], bias=True)
 
         self.t_embedder_ls = nn.ModuleList([TimestepEmbedder(hidden_size*mult) for mult in mult_channels[:self.levels]])
@@ -394,6 +393,9 @@ class DiC(nn.Module):
 
         stages = self.levels - 1
 
+        self.project = nn.Linear(2064, 96)
+        self.project1 = nn.Linear(96, 192)
+        self.project2 = nn.Linear(192, 384)
         # encoder
         for level_idx, mult, next_mult in zip(range(stages), mult_channels[:stages], mult_channels[1:stages+1]):
             channel_size = int(hidden_size * mult)
@@ -497,18 +499,22 @@ class DiC(nn.Module):
 
 
     def forward(self, x, t, y):
-        x = x.unsqueeze(1).expand(64, 3, 8, 8)  # 插入维度并扩展
+        x = x.unsqueeze(1)
         x = self.x_embedder(x)                   # (N, C, H, W)
 
         cond_ls = list() # generate various dim of condition
-        y = y.view(64, -1)  
-        
+
+        y = y.view(y.shape[0],-1)
         for idx in range(self.levels):
             t_emb = self.t_embedder_ls[idx](t)    # (N, C, 1, 1)
             if idx == 0: # first stage
-                y_emb, y_dropped = self.y_embedder_ls[idx](y, self.training)    # (N, C, 1, 1)
+                y_emb = self.project(y)    # (N, C, 1, 1)
+            elif idx == 1:
+                y_emb = self.project1(y_emb)
             else:
-                y_emb, _ = self.y_embedder_ls[idx](y_dropped, False)    # (N, C, 1, 1)
+                 y_emb = self.project2(y_emb)
+                    # (N, C, 1, 1)
+            
             cond_ls.append(t_emb + y_emb)
         
         # last one need special processing
@@ -549,6 +555,9 @@ class DiC(nn.Module):
         x = self.output(x)
 
         x = self.final_layer(x, c_ls[stage_idx-1]) # (N, T, patch_size ** 2 * out_channels) # stick to last stage
+
+        x = x.mean(dim=1)
+        x = x.view(x.shape[0], -1, 8)  # 形状变成 [64, 16, 8]  # 形状变成 [64, 8, 8]
 
         return x
 
@@ -609,15 +618,15 @@ if __name__=="__main__":
     import warnings
 
 
-    model = DiC_XL()
+    model = DiC_S()
     # model.load_state_dict(torch.load('path/to/weight', map_location='cpu'))
 
     model.cuda()
     model.eval()
 
-    inputs = torch.rand(1, 4, 32, 32).cuda()
+    inputs = torch.rand(64, 8, 8).cuda()
     t = torch.ones(1).int().cuda()
-    y = torch.ones(1).int().cuda()
+    y = torch.rand(64, 2, 1032).cuda()
     
     model(inputs, t, y)
     out = model(inputs, t, y)
@@ -637,7 +646,7 @@ if __name__=="__main__":
 
     # backward test
     out = model(inputs, t, y)
-    gt = torch.rand(1, 8, 32, 32).cuda()
+    gt = torch.rand(64, 8, 8).cuda()
 
     loss = torch.mean(out-gt)
     loss.backward()

@@ -501,7 +501,8 @@ class DiC(nn.Module):
 
         cond_ls = list() # generate various dim of condition
 
-
+        print(x.shape)
+        print(y.shape)
         for idx in range(self.levels):
             t_emb = self.t_embedder_ls[idx](t)    # (N, C, 1, 1)
             if idx == 0: # first stage
@@ -509,7 +510,8 @@ class DiC(nn.Module):
             else:
                 y_emb, _ = self.y_embedder_ls[idx](y_dropped, False)    # (N, C, 1, 1)
             cond_ls.append(t_emb + y_emb)
-        
+            print(t_emb.shape, y_emb.shape, y_dropped.shape)
+            print(len(cond_ls), len(cond_ls[0]), len(cond_ls[0][0]), len(cond_ls[0][0]))
         # last one need special processing
         c_ls = cond_ls + cond_ls[1:-1][::-1] + [cond_ls[self.last_stage_cond_idx]]
 
@@ -608,7 +610,7 @@ if __name__=="__main__":
     import warnings
 
 
-    model = DiC_XL()
+    model = DiC_S()
     # model.load_state_dict(torch.load('path/to/weight', map_location='cpu'))
 
     model.cuda()
