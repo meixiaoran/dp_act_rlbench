@@ -13,6 +13,8 @@ from diffusion_policy.model.diffusion.mask_generator import LowdimMaskGenerator
 from diffusion_policy.model.vision.model_getter import get_resnet
 from diffusion_policy.model.diffusion.udit_models import U_DiT_DP
 from diffusion_policy.model.diffusion.dic_models import DiC_S
+from diffusion_policy.model.diffusion.dic_model_B import DiC_B
+
 from diffusion_policy.common.pytorch_util import dict_apply, replace_submodules
 
 

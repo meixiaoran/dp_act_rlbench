@@ -499,7 +499,8 @@ class DiC(nn.Module):
 
 
     def forward(self, x, t, y):
-      
+        t = t.view(-1)
+        t = t.to("cuda:0")
         x = x.unsqueeze(1)
         x = self.x_embedder(x)                   # (N, C, H, W)
 
