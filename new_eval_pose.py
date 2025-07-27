@@ -270,7 +270,7 @@ def main(checkpoint, ckpt_name0, device, task_name, robot_name, epochs=50, onscr
                 # `numpy()` 用于转换为 NumPy 数组，方便后续处理。
                 # print(action)
                 # print(action)
-                for i in range(8):
+                for i in range(6):
                     action_first_six = action[i]
 
                     quaternion_raw = action_first_six[3:7]
@@ -370,7 +370,7 @@ if __name__ == '__main__':
     import argparse
 
     parser = argparse.ArgumentParser(description="Run diffusion policy with command-line arguments.")
-    parser.add_argument('--checkpoint', type=str, default='/home/mar/ckpt/dic_open_box/checkpoints/200.ckpt')
+    parser.add_argument('--checkpoint', type=str, default='/home/mar/ckpt/dic_open_box/checkpoints/300.ckpt')
     parser.add_argument('--task_name', type=str, default='open_box')
 
     # 也可以为其他参数添加默认值
