@@ -370,8 +370,8 @@ if __name__ == '__main__':
     import argparse
 
     parser = argparse.ArgumentParser(description="Run diffusion policy with command-line arguments.")
-    parser.add_argument('--checkpoint', type=str, default='/home/mar/ckpt/DiC/12.19.26_train_diffusion_transformer_hybrid_reach_target/checkpoints/300.ckpt')
-    parser.add_argument('--task_name', type=str, default='pick_up_cup')
+    parser.add_argument('--checkpoint', type=str, default='/home/mar/ckpt/dic_open_box/checkpoints/200.ckpt')
+    parser.add_argument('--task_name', type=str, default='open_box')
 
     # 也可以为其他参数添加默认值
     parser.add_argument('--ckpt_name0', type=str, default='latest.ckpt')
