@@ -44,7 +44,12 @@ class TrainDiffusionTransformerHybridWorkspace(BaseWorkspace):
         
         # 配置模型
         self.model: DiffusionTransformerHybridImagePolicy = hydra.utils.instantiate(cfg.policy)  # 使用 Hydra 实例化模型（根据配置文件）
+        total_params = sum(p.numel() for p in self.model.parameters())
+        param_size_in_bytes = total_params * 4
 
+        # 转换为 MB
+        param_size_in_mb = param_size_in_bytes / (1024 ** 2)
+        print(f"模型大小: {param_size_in_mb:.2f} MB")
         # 配置指数移动平均（EMA）模型
         self.ema_model: DiffusionTransformerHybridImagePolicy = None  # 初始化 ema_model 为 None
         if cfg.training.use_ema:  # 如果配置中启用了 EMA
