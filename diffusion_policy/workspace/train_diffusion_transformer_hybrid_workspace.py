@@ -139,7 +139,7 @@ class TrainDiffusionTransformerHybridWorkspace(BaseWorkspace):
 
         # Initialize SwanLab experiment
         swanlab_run = swanlab.init(
-            project="dic",  # Specify your SwanLab project name
+            project="dic_and_reversed",  # Specify your SwanLab project name
             config=OmegaConf.to_container(cfg, resolve=True),  # Convert config to dictionary
         )
 

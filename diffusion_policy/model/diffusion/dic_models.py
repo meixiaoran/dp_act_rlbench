@@ -557,11 +557,14 @@ class DiC(nn.Module):
         x = self.output(x)
 
         x = self.final_layer(x, c_ls[stage_idx-1]) # (N, T, patch_size ** 2 * out_channels) # stick to last stage
+        x1 = x[:,0,:,:]
+        x1 = x1.view(x.shape[0], -1, 8)
+        x2 = x[:,1,:,:]
+        x2 = x2.view(x.shape[0], -1, 8)
+        # x = x.mean(dim=1)
+        # x = x.view(x.shape[0], -1, 8)  # 形状变成 [64, 16, 8]  # 形状变成 [64, 8, 8]
 
-        x = x.mean(dim=1)
-        x = x.view(x.shape[0], -1, 8)  # 形状变成 [64, 16, 8]  # 形状变成 [64, 8, 8]
-
-        return x
+        return x1, x2
 
     def forward_with_cfg(self, x, t, y, cfg_scale):
         # https://github.com/openai/glide-text2im/blob/main/notebooks/text2im.ipynb

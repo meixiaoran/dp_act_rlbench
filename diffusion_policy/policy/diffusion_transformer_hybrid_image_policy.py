@@ -104,7 +104,7 @@ class DiffusionTransformerHybridImagePolicy(BaseImagePolicy):
         #     obs_as_cond=obs_as_cond,
         #     n_cond_layers=n_cond_layers
         # )
-        model = DiC_B()
+        model = DiC_S()
         self.model = nn.ModuleDict({
             'obs_encoder': obs_encoder,
             'model': model
@@ -325,7 +325,7 @@ class DiffusionTransformerHybridImagePolicy(BaseImagePolicy):
         noisy_trajectory[condition_mask] = trajectory[condition_mask]
 
         # Predict the noise residual
-        pred = self.model['model'](noisy_trajectory, timesteps, cond)
+        pred1, pred2 = self.model['model'](noisy_trajectory, timesteps, cond)
         pred_type = self.noise_scheduler.config.prediction_type
         if pred_type == 'epsilon':
             target = noise
@@ -334,8 +334,19 @@ class DiffusionTransformerHybridImagePolicy(BaseImagePolicy):
         else:
             raise ValueError(f"Unsupported prediction type {pred_type}")
 
-        loss = F.mse_loss(pred, noise, reduction='none')
-        loss = loss * loss_mask.type(loss.dtype)
-        loss = reduce(loss, 'b ... -> b (...)', 'mean')
-        loss = loss.mean()
+        loss1 = F.mse_loss(pred1, noise, reduction='none')
+        loss1 = loss1 * loss_mask.type(loss1.dtype)
+        loss1 = reduce(loss1, 'b ... -> b (...)', 'mean')
+        loss1 = loss1.mean()
+
+        # Flip the noise for loss2
+        noise = torch.flip(noise, dims=[1])
+
+        loss2 = F.mse_loss(pred2, noise, reduction='none')
+        loss2 = loss2 * loss_mask.type(loss2.dtype)  # Use loss2.dtype here
+        loss2 = reduce(loss2, 'b ... -> b (...)', 'mean')
+        loss2 = loss2.mean()
+
+        # Combine the two losses
+        loss = (loss1 + loss2) / 2.0
         return loss
