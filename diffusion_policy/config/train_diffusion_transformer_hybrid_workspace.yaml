@@ -109,7 +109,7 @@ training:
   # training loop control
   # in epochs
   rollout_every: 50               # 每50个epoch进行一次训练过程中轨迹采样。
-  checkpoint_every: 100            # 每50个epoch保存一次模型检查点。
+  checkpoint_every: 50            # 每50个epoch保存一次模型检查点。
   val_every: 5                    # 每1个epoch进行一次验证。
   sample_every: 5                 # 每5个epoch进行一次样本生成。
   # steps per epoch

@@ -450,13 +450,13 @@ class DiC(nn.Module):
         # Initialize label embedding table:
         for y_embedder in self.y_embedder_ls:
             nn.init.normal_(y_embedder.embedding_table.weight, std=0.02)
-
+        
         # Initialize timestep embedding MLP:
         for t_embedder in self.t_embedder_ls:
             nn.init.normal_(t_embedder.mlp[0].weight, std=0.02)
             nn.init.normal_(t_embedder.mlp[2].weight, std=0.02)
 
-
+   
         # Zero-out adaLN modulation layers
         for blocks in self.enc_blocks:
             for block in blocks:
@@ -524,7 +524,8 @@ class DiC(nn.Module):
 
         skip = list()
         stage_idx = 0
-
+        import time
+        time1 = time.time()
         # encoder: first infer, then downsample
         for idx, stage in enumerate(self.enc_blocks):
             for blk_idx, block in enumerate(stage):
@@ -535,12 +536,12 @@ class DiC(nn.Module):
             stage_idx += 1
             x = self.downs[idx](x)
 
-        
+        time2 = time.time()
         for idx, stage in enumerate(self.lat_blocks):
             for block in stage:
                 x = block(x, c_ls[stage_idx])
             stage_idx += 1
-
+        time3 = time.time()
         # decoder: first upsample, then merge skip, then infer
         for idx, stage in enumerate(self.dec_blocks):
             x = self.ups[idx](x)
@@ -553,6 +554,8 @@ class DiC(nn.Module):
                     x = block(x, c_ls[stage_idx])
             stage_idx += 1
 
+        time4 = time.time()
+        # print(time2 - time1, time3 - time2, time4 - time3)
         # output
         x = self.output(x)
 

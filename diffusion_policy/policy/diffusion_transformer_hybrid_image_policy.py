@@ -104,7 +104,7 @@ class DiffusionTransformerHybridImagePolicy(BaseImagePolicy):
         #     obs_as_cond=obs_as_cond,
         #     n_cond_layers=n_cond_layers
         # )
-        model = DiC_B()
+        model = DiC_S()
         self.model = nn.ModuleDict({
             'obs_encoder': obs_encoder,
             'model': model
