@@ -370,7 +370,7 @@ if __name__ == '__main__':
     import argparse
 
     parser = argparse.ArgumentParser(description="Run diffusion policy with command-line arguments.")
-    parser.add_argument('--checkpoint', type=str, default='/home/mar/dp_act_rlbench/data/outputs/2025.08.06/21.53.49_train_diffusion_transformer_hybrid_reach_target/checkpoints/50.ckpt')
+    parser.add_argument('--checkpoint', type=str, default='/home/mar/dp_act_rlbench/data/outputs/2025.08.07/16.08.09_train_diffusion_transformer_hybrid_reach_target/checkpoints/0.ckpt')
     parser.add_argument('--task_name', type=str, default='pick_up_cup')
 
     # 也可以为其他参数添加默认值
@@ -379,7 +379,7 @@ if __name__ == '__main__':
     parser.add_argument('--device', type=str, default='cuda:0')
     parser.add_argument('--epochs', type=int, default=100)
     parser.add_argument('--no_onscreen_render', dest='onscreen_render', action='store_false')
-    parser.set_defaults(onscreen_render=True)
+    parser.set_defaults(onscreen_render=False)
     parser.add_argument('--variation', type=int, default=0)
     args = parser.parse_args()
 

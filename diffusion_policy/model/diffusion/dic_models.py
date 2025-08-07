@@ -555,7 +555,7 @@ class DiC(nn.Module):
             stage_idx += 1
 
         time4 = time.time()
-        # print(time2 - time1, time3 - time2, time4 - time3)
+        print(time2 - time1, time3 - time2, time4 - time3)
         # output
         x = self.output(x)
 
