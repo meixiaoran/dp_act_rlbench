@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # 无限循环版本，修改为每次增加50，遇到错误等待10分钟后重新执行
 
-ckpt=250
+ckpt=350
 max_ckpt=1000
 
 while [ $ckpt -le $max_ckpt ]; do
