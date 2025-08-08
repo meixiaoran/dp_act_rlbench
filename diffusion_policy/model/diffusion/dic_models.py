@@ -393,7 +393,8 @@ class DiC(nn.Module):
 
         stages = self.levels - 1
 
-        self.project = nn.Linear(2064, 96)
+        self.proj_x = nn.Linear(2064, 256)
+        self.project = nn.Linear(64, 96)
         self.project1 = nn.Linear(96, 192)
         self.project2 = nn.Linear(192, 384)
         # encoder
@@ -501,7 +502,14 @@ class DiC(nn.Module):
     def forward(self, x, t, y):
         t = t.view(-1)
         t = t.to("cuda:0")
+        x = x.view(x.shape[0], -1)
+        x = self.proj_x(x)
+        x = x.view(x.shape[0], 2**4, -1)
+
+
         x = x.unsqueeze(1)
+
+
         x = self.x_embedder(x)                   # (N, C, H, W)
 
         cond_ls = list() # generate various dim of condition
@@ -563,6 +571,7 @@ class DiC(nn.Module):
 
         x = x.mean(dim=1)
         x = x.view(x.shape[0], -1, 8)  # 形状变成 [64, 16, 8]  # 形状变成 [64, 8, 8]
+        x = x[:, :8, :]
 
         return x
 
@@ -629,9 +638,9 @@ if __name__=="__main__":
     model.cuda()
     model.eval()
 
-    inputs = torch.rand(64, 8, 8).cuda()
+    inputs = torch.rand(64, 2, 1032).cuda()
     t = torch.ones(1).int().cuda()
-    y = torch.rand(64, 2, 1032).cuda()
+    y = torch.rand(64, 8, 8).cuda()
     
     model(inputs, t, y)
     import time
