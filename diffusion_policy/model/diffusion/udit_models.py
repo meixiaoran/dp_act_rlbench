@@ -662,7 +662,7 @@ class U_DiT(nn.Module):
             learn_sigma=True,
             rep=1,
             ffn_type='rep',
-            global_cond_dim=528,
+            global_cond_dim=1032,
             **kwargs
     ):
         super().__init__()
@@ -972,7 +972,7 @@ def U_DiT_L(**kwargs):
     return U_DiT(down_factor=2, hidden_size=384, num_heads=16, depth=[2, 5, 8, 5, 2], ffn_type='rep', rep=1,
                  mlp_ratio=2, attn_type='v2', posemb_type='rope2d', downsampler='dwconv5', down_shortcut=1)
 
-def U_DiT_DP(global_cond_dim=784):
+def U_DiT_DP(global_cond_dim=1032):
     # ----dp-U_DiT-S----
     # return U_DiT(input_size=8, down_factor=2, hidden_size=96, num_heads=4, depth=[2, 5, 8, 5, 2], ffn_type='basic', rep=1,
     #              mlp_ratio=2, attn_type='v2', posemb_type='rope2d', downsampler='dwconv5', down_shortcut=1)
@@ -1003,22 +1003,30 @@ if __name__ == "__main__":
     model.cuda()
     model.eval()
 
-    inputs = torch.rand(1, 16, 8).cuda()
+    inputs = torch.rand(64, 8, 8).cuda()
     t = torch.ones(1).int().cuda()
-    y = torch.rand(1, 2, 264).cuda()
-
+    y = torch.rand(64, 1, 1032).cuda()
+    import time
+    
     model(inputs, t, y)
+    
+    start = time.time()
     out = model(inputs, t, y)
+    print(time.time() - start)
 
-    flops = profile_macs(model, (inputs, t, y))
-    print(f'FLOPS: {flops / 1e6:.2f}')
+    params = 0
+    for P in model.parameters():
+        params += P.numel()
+
+    print(f'PARAMS: {params/1e6:.2f} M')
+
 
     model.train()
     print(f"output : {out.size()}")
 
     # backward test
     out = model(inputs, t, y)
-    gt = torch.rand(1, 8, 32, 32).cuda()
+    gt = torch.rand(64, 8, 8).cuda()
 
-    loss = torch.mean(out - gt)
+    loss = torch.mean(out-gt)
     loss.backward()

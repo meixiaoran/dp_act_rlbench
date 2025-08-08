@@ -555,7 +555,7 @@ class DiC(nn.Module):
             stage_idx += 1
 
         time4 = time.time()
-        print(time2 - time1, time3 - time2, time4 - time3)
+        # print(time2 - time1, time3 - time2, time4 - time3)
         # output
         x = self.output(x)
 
@@ -608,7 +608,7 @@ def DiC_B(**kwargs):
     return DiC_default(depth=[6,6,5,6,6], hidden_size=192, **kwargs)
 
 def DiC_S(**kwargs):
-    return DiC_default(depth=[6,6,5,6,6], hidden_size=96, **kwargs)
+    return DiC_default(depth=[2,5,8,5,2], hidden_size=96, **kwargs)
 
 DiC_models = {
     'DiC-S': DiC_S,
@@ -634,7 +634,10 @@ if __name__=="__main__":
     y = torch.rand(64, 2, 1032).cuda()
     
     model(inputs, t, y)
+    import time
+    start = time.time()
     out = model(inputs, t, y)
+    print(time.time() - start)
 
     flops = profile_macs(model, (inputs, t, y))
     print(f'FLOPS: {flops/1e9:.2f} G')

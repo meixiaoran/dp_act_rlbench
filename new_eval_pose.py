@@ -301,7 +301,7 @@ def main(checkpoint, ckpt_name0, device, task_name, robot_name, epochs=50, onscr
                         print(action_world)
                         # print("timeout:" + str(time.time() - start_time))
                         if(time.time() - start_time > 50.0):
-                            t = 300
+                            t = 200
                             break
                         continue
 
@@ -322,7 +322,7 @@ def main(checkpoint, ckpt_name0, device, task_name, robot_name, epochs=50, onscr
                     # print(t)
 
 
-                if t >= 300:
+                if t >= 200:
                     rewards = [0 for _ in rewards]
                     break
 
@@ -370,7 +370,7 @@ if __name__ == '__main__':
     import argparse
 
     parser = argparse.ArgumentParser(description="Run diffusion policy with command-line arguments.")
-    parser.add_argument('--checkpoint', type=str, default='/home/mar/dp_act_rlbench/data/outputs/2025.08.07/16.08.09_train_diffusion_transformer_hybrid_reach_target/checkpoints/0.ckpt')
+    parser.add_argument('--checkpoint', type=str, default='/home/mar/ckpt/DIC_S_25852/checkpoints/250.ckpt')
     parser.add_argument('--task_name', type=str, default='pick_up_cup')
 
     # 也可以为其他参数添加默认值
@@ -379,7 +379,7 @@ if __name__ == '__main__':
     parser.add_argument('--device', type=str, default='cuda:0')
     parser.add_argument('--epochs', type=int, default=100)
     parser.add_argument('--no_onscreen_render', dest='onscreen_render', action='store_false')
-    parser.set_defaults(onscreen_render=False)
+    parser.set_defaults(onscreen_render=True)
     parser.add_argument('--variation', type=int, default=0)
     args = parser.parse_args()
 
