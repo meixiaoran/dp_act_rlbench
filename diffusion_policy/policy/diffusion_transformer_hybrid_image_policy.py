@@ -325,7 +325,7 @@ class DiffusionTransformerHybridImagePolicy(BaseImagePolicy):
         noisy_trajectory[condition_mask] = trajectory[condition_mask]
 
         # Predict the noise residual
-        pred = self.model['model'](noisy_trajectory, timesteps, cond)
+        pred = self.model['model'](cond, timesteps, noisy_trajectory)
         pred_type = self.noise_scheduler.config.prediction_type
         if pred_type == 'epsilon':
             target = noise
