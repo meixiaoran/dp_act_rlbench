@@ -394,9 +394,12 @@ class DiC(nn.Module):
         stages = self.levels - 1
 
         self.proj_x = nn.Linear(2064, 256)
+
         self.project = nn.Linear(64, 96)
         self.project1 = nn.Linear(96, 192)
         self.project2 = nn.Linear(192, 384)
+
+        self.pro_out = nn.Conv1d(in_channels=32, out_channels=8, kernel_size=1)
         # encoder
         for level_idx, mult, next_mult in zip(range(stages), mult_channels[:stages], mult_channels[1:stages+1]):
             channel_size = int(hidden_size * mult)
@@ -571,7 +574,7 @@ class DiC(nn.Module):
 
         x = x.mean(dim=1)
         x = x.view(x.shape[0], -1, 8)  # 形状变成 [64, 16, 8]  # 形状变成 [64, 8, 8]
-        x = x[:, :8, :]
+        x = self.pro_out(x)
 
         return x
 
