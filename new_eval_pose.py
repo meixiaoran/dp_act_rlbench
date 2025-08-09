@@ -301,7 +301,7 @@ def main(checkpoint, ckpt_name0, device, task_name, robot_name, epochs=50, onscr
                         print(action_world)
                         # print("timeout:" + str(time.time() - start_time))
                         if(time.time() - start_time > 50.0):
-                            t = 200
+                            t = 300
                             break
                         continue
 
@@ -322,7 +322,7 @@ def main(checkpoint, ckpt_name0, device, task_name, robot_name, epochs=50, onscr
                     # print(t)
 
 
-                if t >= 200:
+                if t >= 300:
                     rewards = [0 for _ in rewards]
                     break
 
@@ -370,8 +370,8 @@ if __name__ == '__main__':
     import argparse
 
     parser = argparse.ArgumentParser(description="Run diffusion policy with command-line arguments.")
-    parser.add_argument('--checkpoint', type=str, default='/home/mar/ckpt/DIC_S_25852/checkpoints/250.ckpt')
-    parser.add_argument('--task_name', type=str, default='pick_up_cup')
+    parser.add_argument('--checkpoint', type=str, default='/home/mar/ckpt/open_box/dic_picture/checkpoints/800.ckpt')
+    parser.add_argument('--task_name', type=str, default='open_box')
 
     # 也可以为其他参数添加默认值
     parser.add_argument('--ckpt_name0', type=str, default='latest.ckpt')
