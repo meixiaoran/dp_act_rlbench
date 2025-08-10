@@ -370,8 +370,8 @@ if __name__ == '__main__':
     import argparse
 
     parser = argparse.ArgumentParser(description="Run diffusion policy with command-line arguments.")
-    parser.add_argument('--checkpoint', type=str, default='/home/mar/ckpt/open_box/dic_picture/checkpoints/800.ckpt')
-    parser.add_argument('--task_name', type=str, default='open_box')
+    parser.add_argument('--checkpoint', type=str, default='/home/mar/ckpt/take_umbrella/dic/checkpoints/300.ckpt')
+    parser.add_argument('--task_name', type=str, default='take_umbrella_out_of_umbrella_stand')
 
     # 也可以为其他参数添加默认值
     parser.add_argument('--ckpt_name0', type=str, default='latest.ckpt')
