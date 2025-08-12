@@ -6,7 +6,7 @@ max_ckpt=1000
 
 while [ $ckpt -le $max_ckpt ]; do
     echo "[$(date '+%F %T')] 启动 python new_eval_pose.py ..."
-    python new_eval_pose.py --checkpoint /home/mar/ckpt/take_umbrella/dic/checkpoints/${ckpt}.ckpt
+    python new_eval_pose.py --checkpoint /home/mar/ckpt/take_money/dic/checkpoints/${ckpt}.ckpt
     if [ $? -eq 0 ]; then
         echo "[$(date '+%F %T')] 训练完成，继续下一个ckpt."
         ((ckpt+=100))  # 增加50

@@ -370,8 +370,8 @@ if __name__ == '__main__':
     import argparse
 
     parser = argparse.ArgumentParser(description="Run diffusion policy with command-line arguments.")
-    parser.add_argument('--checkpoint', type=str, default='/home/mar/ckpt/take_money/dic/checkpoints/800.ckpt')
-    parser.add_argument('--task_name', type=str, default='take_money_out_safe')
+    parser.add_argument('--checkpoint', type=str, default='/home/mar/ckpt/phone_on_base/dp/checkpoints/900.ckpt')
+    parser.add_argument('--task_name', type=str, default='phone_on_base')
 
     # 也可以为其他参数添加默认值
     parser.add_argument('--ckpt_name0', type=str, default='latest.ckpt')
