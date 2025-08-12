@@ -81,7 +81,7 @@ def get_image(ts):
     return curr_image
 
 
-def main(checkpoint, ckpt_name0, device, task_name, robot_name, epochs=50, onscreen_render=False, variation=0, save_episode=True):
+def main(checkpoint, ckpt_name0, device, task_name, robot_name, epochs=50, onscreen_render=False, variation=1, save_episode=True):
 
     # 检查输出目录是否存在，若存在则询问是否覆盖
     # if os.path.exists(output_dir):
@@ -370,7 +370,7 @@ if __name__ == '__main__':
     import argparse
 
     parser = argparse.ArgumentParser(description="Run diffusion policy with command-line arguments.")
-    parser.add_argument('--checkpoint', type=str, default='/home/mar/ckpt/phone_on_base/dp/checkpoints/900.ckpt')
+    parser.add_argument('--checkpoint', type=str, default='/home/mar/ckpt/beat_the_buzz/dic/checkpoints/500.ckpt')
     parser.add_argument('--task_name', type=str, default='phone_on_base')
 
     # 也可以为其他参数添加默认值
@@ -380,7 +380,7 @@ if __name__ == '__main__':
     parser.add_argument('--epochs', type=int, default=100)
     parser.add_argument('--no_onscreen_render', dest='onscreen_render', action='store_false')
     parser.set_defaults(onscreen_render=True)
-    parser.add_argument('--variation', type=int, default=0)
+    parser.add_argument('--variation', type=int, default=1)
     args = parser.parse_args()
 
     main(
