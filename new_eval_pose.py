@@ -380,7 +380,7 @@ if __name__ == '__main__':
     parser.add_argument('--epochs', type=int, default=100)
     parser.add_argument('--no_onscreen_render', dest='onscreen_render', action='store_false')
     parser.set_defaults(onscreen_render=True)
-    parser.add_argument('--variation', type=int, default=1)
+    parser.add_argument('--variation', type=int, default=0)
     args = parser.parse_args()
 
     main(
