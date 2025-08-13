@@ -234,7 +234,168 @@ class Upsample(nn.Module):
 
     def forward(self, x):
         return self.body(x)
-    
+
+
+
+
+class PolicyUNetBlock(nn.Module):
+    def __init__(self,
+        in_channels, out_channels, emb_channels, 
+        dropout=0.1, skip_scale=1, eps=1e-5,
+        num_heads=4,  # 注意力头数
+        num_groups=8,  # 组归一化组数
+        **kwargs
+    ):
+        super().__init__()
+        self.in_channels = in_channels
+        self.out_channels = out_channels
+        self.emb_channels = emb_channels
+        self.dropout = dropout
+        # 1. 归一化层改进：LayerScaled GroupNorm
+        self.norm0 = nn.GroupNorm(num_groups, in_channels, eps=eps)
+        self.gamma0 = nn.Parameter(torch.ones(1, in_channels, 1, 1) * 1e-6)
+        
+        # 2. 卷积层改进：深度可分离7x7卷积
+        self.conv0 = nn.Sequential(
+            nn.Conv2d(in_channels, in_channels, kernel_size=7, padding=3, groups=in_channels),
+            nn.Conv2d(in_channels, out_channels, kernel_size=1)
+        )
+        
+        # 3. 条件注入改进：超嵌入Transformer
+        self.affine = HyperEmbedding(
+            emb_channels, 
+            out_features=4 * out_channels,  # gate_c, gate_s, scale, shift
+            num_layers=2,
+            num_heads=num_heads
+        )
+        
+        # 4. 层缩放归一化
+        self.norm1 = nn.GroupNorm(num_groups, out_channels, eps=eps)
+        self.gamma1 = nn.Parameter(torch.ones(1, out_channels, 1, 1) * 1e-6)
+        
+        # 5. 激活函数改进：SwiGLU
+        self.swiglu = SwiGLU(out_channels)
+        
+        # 6. 输出卷积
+        self.conv1 = nn.Conv2d(out_channels, out_channels, kernel_size=3, padding=1)
+        
+        # 7. Skip连接改进：门控注意力
+        self.skip = GatedAttentionSkip(in_channels, out_channels) if in_channels != out_channels else None
+        self.skip_scale = skip_scale
+        
+        # 初始化
+        nn.init.constant_(self.conv1.weight, 0)  # 零初始化输出层
+
+    def forward(self, x, emb):
+        orig = x
+        
+        # 归一化 + 层缩放
+        x = self.gamma0 * self.norm0(x)
+        
+        # 深度可分离卷积
+        x = self.conv0(x)
+        
+        # 超嵌入条件调制
+        gate_c, gate_s, scale, shift = self.affine(emb).chunk(4, dim=1)
+        gate_c = gate_c.unsqueeze(-1).unsqueeze(-1)
+        gate_s = gate_s.unsqueeze(-1).unsqueeze(-1)
+        scale = scale.unsqueeze(-1).unsqueeze(-1)
+        shift = shift.unsqueeze(-1).unsqueeze(-1)
+        
+        # 空间-通道分离门控
+        x = x * gate_s  # 空间门控
+        x = x * gate_c  # 通道门控
+        
+        # 特征调制
+        x = torch.addcmul(shift, x, scale + 1)
+        
+        # 归一化 + 层缩放
+        x = self.gamma1 * self.norm1(x)
+        
+        # SwiGLU激活
+        x = self.swiglu(x)
+        
+        # 输出卷积
+        x = self.conv1(F.dropout(x, p=self.dropout, training=self.training))
+        
+        # 门控注意力Skip连接
+        skip_val = self.skip(orig) if self.skip is not None else orig
+        x = x + skip_val
+        return x * self.skip_scale
+
+
+# ===== 核心改进模块 =====
+
+class HyperEmbedding(nn.Module):
+    """微型Transformer生成多组调制参数"""
+    def __init__(self, emb_channels, out_features, num_layers=2, num_heads=4):
+        super().__init__()
+        self.initial_fc = nn.Linear(emb_channels, emb_channels * 4)
+        
+        # 微型Transformer
+        encoder_layer = nn.TransformerEncoderLayer(
+            d_model=emb_channels * 4,
+            nhead=num_heads,
+            dim_feedforward=emb_channels * 2,
+            batch_first=True,
+            activation="gelu"
+        )
+        self.transformer = nn.TransformerEncoder(encoder_layer, num_layers)
+        
+        self.output_fc = nn.Linear(emb_channels * 4, out_features)
+
+    def forward(self, emb):
+        # emb: [B, D]
+        x = self.initial_fc(emb).unsqueeze(1)  # [B, 1, 4D]
+        x = self.transformer(x)  # [B, 1, 4D]
+        return self.output_fc(x.squeeze(1))  # [B, out_features]
+
+class GatedAttentionSkip(nn.Module):
+    """轻量门控注意力Skip连接"""
+    def __init__(self, in_channels, out_channels, reduction=4):
+        super().__init__()
+        self.conv = nn.Conv2d(in_channels, out_channels, kernel_size=1)
+        
+        # 通道注意力
+        self.channel_att = nn.Sequential(
+            nn.AdaptiveAvgPool2d(1),
+            nn.Conv2d(out_channels, out_channels // reduction, 1),
+            nn.ReLU(),
+            nn.Conv2d(out_channels // reduction, out_channels, 1),
+            nn.Sigmoid()
+        )
+        
+        # 空间注意力
+        self.spatial_att = nn.Sequential(
+            nn.Conv2d(out_channels, 1, kernel_size=3, padding=1),
+            nn.Sigmoid()
+        )
+
+    def forward(self, x):
+        x = self.conv(x)
+        channel_att = self.channel_att(x)
+        spatial_att = self.spatial_att(x)
+        return x * channel_att * spatial_att
+
+class SwiGLU(nn.Module):
+    """高效卷积版SwiGLU激活函数"""
+    def __init__(self, dim):
+        super().__init__()
+        # 使用1x1卷积替代线性层，避免维度变换
+        self.w = nn.Conv2d(dim, dim * 2, kernel_size=1)
+        self.v = nn.Conv2d(dim, dim, kernel_size=1)
+        
+        # 初始化：输出层权重归零
+        nn.init.constant_(self.w.weight, 0)
+        nn.init.constant_(self.w.bias, 0)
+        nn.init.constant_(self.v.weight, 0)
+        nn.init.constant_(self.v.bias, 0)
+
+    def forward(self, x):
+        # 直接卷积操作，保持[B, C, H, W]格式
+        gate, base = self.w(x).chunk(2, dim=1)
+        swish = F.silu(gate) * self.v(x)
+        return swish
 
 
 class UNetBlock(torch.nn.Module):
@@ -329,7 +490,7 @@ class UNetBlock(torch.nn.Module):
 class U_Block(nn.Module):
     def __init__(self, input_size, hidden_size, input_chans=None, **kwargs):
         super().__init__()
-        self.conv = UNetBlock(input_chans if input_chans else hidden_size, hidden_size, emb_channels=hidden_size, **kwargs)
+        self.conv = PolicyUNetBlock(input_chans if input_chans else hidden_size, hidden_size, emb_channels=hidden_size, **kwargs)
 
     def forward(self, x, c):
         return self.conv(x, c)
@@ -342,7 +503,7 @@ class DiC(nn.Module):
     def __init__(
         self,
         input_size=32,
-        in_channels=4,
+        in_channels=1,
         hidden_size=1152,
         depth=[2*2,5*2,8*2,5*2,2*2],
         num_heads=16,
@@ -393,6 +554,9 @@ class DiC(nn.Module):
 
         stages = self.levels - 1
 
+        self.project = nn.Linear(2064, 96)
+        self.project1 = nn.Linear(96, 192)
+        self.project2 = nn.Linear(192, 384)
         # encoder
         for level_idx, mult, next_mult in zip(range(stages), mult_channels[:stages], mult_channels[1:stages+1]):
             channel_size = int(hidden_size * mult)
@@ -447,13 +611,13 @@ class DiC(nn.Module):
         # Initialize label embedding table:
         for y_embedder in self.y_embedder_ls:
             nn.init.normal_(y_embedder.embedding_table.weight, std=0.02)
-
+        
         # Initialize timestep embedding MLP:
         for t_embedder in self.t_embedder_ls:
             nn.init.normal_(t_embedder.mlp[0].weight, std=0.02)
             nn.init.normal_(t_embedder.mlp[2].weight, std=0.02)
 
-
+   
         # Zero-out adaLN modulation layers
         for blocks in self.enc_blocks:
             for block in blocks:
@@ -496,28 +660,33 @@ class DiC(nn.Module):
 
 
     def forward(self, x, t, y):
-
+        t = t.view(-1)
+        t = t.to("cuda:0")
+        x = x.unsqueeze(1)
         x = self.x_embedder(x)                   # (N, C, H, W)
 
         cond_ls = list() # generate various dim of condition
 
-        print(x.shape)
-        print(y.shape)
+        y = y.view(y.shape[0],-1)
         for idx in range(self.levels):
             t_emb = self.t_embedder_ls[idx](t)    # (N, C, 1, 1)
             if idx == 0: # first stage
-                y_emb, y_dropped = self.y_embedder_ls[idx](y, self.training)    # (N, C, 1, 1)
+                y_emb = self.project(y)    # (N, C, 1, 1)
+            elif idx == 1:
+                y_emb = self.project1(y_emb)
             else:
-                y_emb, _ = self.y_embedder_ls[idx](y_dropped, False)    # (N, C, 1, 1)
+                 y_emb = self.project2(y_emb)
+                    # (N, C, 1, 1)
+            
             cond_ls.append(t_emb + y_emb)
-            print(t_emb.shape, y_emb.shape, y_dropped.shape)
-            print(len(cond_ls), len(cond_ls[0]), len(cond_ls[0][0]), len(cond_ls[0][0]))
+        
         # last one need special processing
         c_ls = cond_ls + cond_ls[1:-1][::-1] + [cond_ls[self.last_stage_cond_idx]]
 
         skip = list()
         stage_idx = 0
-
+        import time
+        time1 = time.time()
         # encoder: first infer, then downsample
         for idx, stage in enumerate(self.enc_blocks):
             for blk_idx, block in enumerate(stage):
@@ -528,12 +697,12 @@ class DiC(nn.Module):
             stage_idx += 1
             x = self.downs[idx](x)
 
-        
+        time2 = time.time()
         for idx, stage in enumerate(self.lat_blocks):
             for block in stage:
                 x = block(x, c_ls[stage_idx])
             stage_idx += 1
-
+        time3 = time.time()
         # decoder: first upsample, then merge skip, then infer
         for idx, stage in enumerate(self.dec_blocks):
             x = self.ups[idx](x)
@@ -546,10 +715,15 @@ class DiC(nn.Module):
                     x = block(x, c_ls[stage_idx])
             stage_idx += 1
 
+        time4 = time.time()
+        # print(time2 - time1, time3 - time2, time4 - time3)
         # output
         x = self.output(x)
 
         x = self.final_layer(x, c_ls[stage_idx-1]) # (N, T, patch_size ** 2 * out_channels) # stick to last stage
+
+        x = x.mean(dim=1)
+        x = x.view(x.shape[0], -1, 8)  # 形状变成 [64, 16, 8]  # 形状变成 [64, 8, 8]
 
         return x
 
@@ -595,7 +769,7 @@ def DiC_B(**kwargs):
     return DiC_default(depth=[6,6,5,6,6], hidden_size=192, **kwargs)
 
 def DiC_S(**kwargs):
-    return DiC_default(depth=[6,6,5,6,6], hidden_size=96, **kwargs)
+    return DiC_default(depth=[1,1,1,1,1], hidden_size=96, **kwargs)
 
 DiC_models = {
     'DiC-S': DiC_S,
@@ -616,12 +790,15 @@ if __name__=="__main__":
     model.cuda()
     model.eval()
 
-    inputs = torch.rand(1, 4, 32, 32).cuda()
+    inputs = torch.rand(64, 8, 8).cuda()
     t = torch.ones(1).int().cuda()
-    y = torch.ones(1).int().cuda()
+    y = torch.rand(64, 2, 1032).cuda()
     
     model(inputs, t, y)
+    import time
+    start = time.time()
     out = model(inputs, t, y)
+    print(time.time() - start)
 
     flops = profile_macs(model, (inputs, t, y))
     print(f'FLOPS: {flops/1e9:.2f} G')
@@ -638,7 +815,7 @@ if __name__=="__main__":
 
     # backward test
     out = model(inputs, t, y)
-    gt = torch.rand(1, 8, 32, 32).cuda()
+    gt = torch.rand(64, 8, 8).cuda()
 
     loss = torch.mean(out-gt)
     loss.backward()
