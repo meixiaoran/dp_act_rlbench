@@ -120,6 +120,103 @@ class DiTBlock(nn.Module):
         x = x + gate_msa.unsqueeze(1) * self.attn(modulate(self.norm1(x), shift_msa, scale_msa))
         x = x + gate_mlp.unsqueeze(1) * self.mlp(modulate(self.norm2(x), shift_mlp, scale_mlp))
         return x
+    
+class UNetBlock(torch.nn.Module):
+    def __init__(self,
+        in_channels, out_channels, emb_channels=None, dropout=0, skip_scale=1, eps=1e-5,
+        resample_filter=[1,1], resample_proj=False, adaptive_scale=1, blockconfig=0, actfunc='silu', actf=[1,1], affinef=2, norm_type='gnorm', norm_type1='gnorm', affine=1, actinada=0, init_zero=0, **kwargs
+    ):
+        super().__init__()
+        self.in_channels = in_channels
+        self.out_channels = out_channels
+        self.emb_channels = emb_channels
+
+        self.dropout = dropout
+        self.skip_scale = skip_scale
+        self.adaptive_scale = adaptive_scale
+        self.blockconfig = blockconfig
+        self.affinef = affinef
+        self.norm_type = norm_type
+        self.norm_type1 = norm_type1
+        self.layernorm_affine = affine
+        self.actinada = actinada
+        self.init_zero = init_zero
+
+        if norm_type == 'gnorm':
+            self.norm0 = GroupNorm(num_channels=in_channels, eps=eps, num_groups=kwargs.get('num_groups', 32), min_channels_per_group=kwargs.get('min_channels', 4))
+
+
+        self.conv0 = nn.Conv2d(in_channels=in_channels, out_channels=out_channels, kernel_size=3, padding=1)
+        self.affine = nn.Sequential(
+            nn.SiLU() if actinada else nn.Identity(),
+            nn.Linear(in_features=emb_channels, out_features=(in_channels if self.blockconfig else out_channels)*self.affinef, bias=True)
+        )
+
+        if self.init_zero:
+            nn.init.constant_(self.affine[-1].weight, 0)
+            nn.init.constant_(self.affine[-1].bias, 0)
+
+        if norm_type1 == 'gnorm':
+            self.norm1 = GroupNorm(num_channels=out_channels, eps=eps)
+
+
+        self.conv1 = nn.Conv2d(in_channels=out_channels, out_channels=out_channels, kernel_size=3, padding=1)
+
+        self.skip = None
+        self.act = nn.GELU if actfunc=='gelu' else nn.SiLU
+        self.act0 = self.act() if actf[0] else nn.Identity()
+        self.act1 = self.act() if actf[1] else nn.Identity()
+
+        if out_channels != in_channels:
+            self.skip = nn.Conv2d(in_channels, out_channels, kernel_size=1)
+
+    def forward(self, x, emb):
+        if self.blockconfig == 0:
+            orig = x
+            x = self.conv0(self.act0(self.norm0(x)))
+
+            params = self.affine(emb).unsqueeze(2).unsqueeze(3).to(x.dtype)
+            if self.affinef == 2:
+                scale, shift = params.chunk(chunks=2, dim=1)
+                gate = 1
+            elif self.affinef == 3:
+                gate, scale, shift = params.chunk(chunks=3, dim=1)
+            x = self.act1(torch.addcmul(shift, self.norm1(x), scale + 1))
+
+
+            x = self.conv1(F.dropout(x, p=self.dropout, training=self.training))
+
+            x = (gate*x).add_(self.skip(orig) if self.skip is not None else orig)
+            x = x * self.skip_scale
+
+        elif self.blockconfig == 1:
+            orig = x
+
+            params = self.affine(emb).unsqueeze(2).unsqueeze(3).to(x.dtype)
+            if self.affinef == 2:
+                scale, shift = params.chunk(chunks=2, dim=1)
+                gate = 1
+            elif self.affinef == 3:
+                gate, scale, shift = params.chunk(chunks=3, dim=1)
+            x = self.conv0(self.act0(torch.addcmul(shift, self.norm0(x), scale + 1)))
+            
+            x = self.act1(self.norm1(x))
+        
+            x = self.conv1(F.dropout(x, p=self.dropout, training=self.training))
+            x = (gate*x).add_(self.skip(orig) if self.skip is not None else orig)
+            x = x * self.skip_scale
+        else:
+            raise NotImplementedError()
+        return x
+    
+
+class U_Block(nn.Module):
+    def __init__(self, input_size, hidden_size, input_chans=None, **kwargs):
+        super().__init__()
+        self.conv = UNetBlock(input_chans if input_chans else hidden_size, hidden_size, emb_channels=hidden_size, **kwargs)
+
+    def forward(self, x, c):
+        return self.conv(x, c)
 
 
 class FinalLayer(nn.Module):
@@ -366,7 +463,7 @@ def DiT_S_4(**kwargs):
     return DiT(depth=12, hidden_size=384, patch_size=4, num_heads=6, **kwargs)
 
 def DiT_S_8(**kwargs):
-    return DiT(depth=12, hidden_size=384, patch_size=8, num_heads=6, **kwargs)
+    return DiT(depth=10, hidden_size=384, patch_size=8, num_heads=6, **kwargs)
 
 
 DiT_models = {

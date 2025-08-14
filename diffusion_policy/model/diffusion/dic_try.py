@@ -378,25 +378,116 @@ class GatedAttentionSkip(nn.Module):
         return x * channel_att * spatial_att
 
 class SwiGLU(nn.Module):
-    """高效卷积版SwiGLU激活函数"""
+    """增强型激活函数"""
     def __init__(self, dim):
         super().__init__()
-        # 使用1x1卷积替代线性层，避免维度变换
-        self.w = nn.Conv2d(dim, dim * 2, kernel_size=1)
-        self.v = nn.Conv2d(dim, dim, kernel_size=1)
-        
-        # 初始化：输出层权重归零
+        self.w = nn.Linear(dim, dim * 2)
+        self.v = nn.Linear(dim, dim)
         nn.init.constant_(self.w.weight, 0)
         nn.init.constant_(self.w.bias, 0)
-        nn.init.constant_(self.v.weight, 0)
-        nn.init.constant_(self.v.bias, 0)
 
     def forward(self, x):
-        # 直接卷积操作，保持[B, C, H, W]格式
-        gate, base = self.w(x).chunk(2, dim=1)
-        swish = F.silu(gate) * self.v(x)
-        return swish
+        # x: [B, C, H, W]
+        B, C, H, W = x.shape
+        x = x.permute(0, 2, 3, 1)  # [B, H, W, C]
+        x_flat = x.reshape(-1, C)
+        
+        gate, value = self.w(x_flat).chunk(2, dim=-1)
+        swish = F.silu(gate) * self.v(x_flat)
+        
+        swish = swish.reshape(B, H, W, C)
+        return swish.permute(0, 3, 1, 2)  # 恢复形   能不能改小一点呢
 
+
+# class UNetBlock(torch.nn.Module):
+#     def __init__(self,
+#         in_channels, out_channels, emb_channels=None, dropout=0, skip_scale=1, eps=1e-5,
+#         resample_filter=[1,1], resample_proj=False, adaptive_scale=1, blockconfig=0, actfunc='silu', actf=[1,1], affinef=2, norm_type='gnorm', norm_type1='gnorm', affine=1, actinada=0, init_zero=0, **kwargs
+#     ):
+#         super().__init__()
+#         self.in_channels = in_channels
+#         self.out_channels = out_channels
+#         self.emb_channels = emb_channels
+
+#         self.dropout = dropout
+#         self.skip_scale = skip_scale
+#         self.adaptive_scale = adaptive_scale
+#         self.blockconfig = blockconfig
+#         self.affinef = affinef
+#         self.norm_type = norm_type
+#         self.norm_type1 = norm_type1
+#         self.layernorm_affine = affine
+#         self.actinada = actinada
+#         self.init_zero = init_zero
+
+
+#         self.swiglu = SwiGLU(out_channels)
+#         if norm_type == 'gnorm':
+#             self.norm0 = GroupNorm(num_channels=in_channels, eps=eps, num_groups=kwargs.get('num_groups', 32), min_channels_per_group=kwargs.get('min_channels', 4))
+
+
+#         self.conv0 = nn.Conv2d(in_channels=in_channels, out_channels=out_channels, kernel_size=3, padding=1)
+#         self.affine = nn.Sequential(
+#             nn.SiLU() if actinada else nn.Identity(),
+#             nn.Linear(in_features=emb_channels, out_features=(in_channels if self.blockconfig else out_channels)*self.affinef, bias=True)
+#         )
+
+#         if self.init_zero:
+#             nn.init.constant_(self.affine[-1].weight, 0)
+#             nn.init.constant_(self.affine[-1].bias, 0)
+
+#         if norm_type1 == 'gnorm':
+#             self.norm1 = GroupNorm(num_channels=out_channels, eps=eps)
+
+
+#         self.conv1 = nn.Conv2d(in_channels=out_channels, out_channels=out_channels, kernel_size=3, padding=1)
+
+#         self.skip = None
+#         self.act = nn.GELU if actfunc=='gelu' else nn.SiLU
+#         self.act0 = self.act() if actf[0] else nn.Identity()
+#         self.act1 = self.act() if actf[1] else nn.Identity()
+
+#         if out_channels != in_channels:
+#             self.skip = nn.Conv2d(in_channels, out_channels, kernel_size=1)
+
+#     def forward(self, x, emb):
+#         if self.blockconfig == 0:
+#             orig = x
+#             x = self.conv0(self.act0(self.norm0(x)))
+
+#             params = self.affine(emb).unsqueeze(2).unsqueeze(3).to(x.dtype)
+#             if self.affinef == 2:
+#                 scale, shift = params.chunk(chunks=2, dim=1)
+#                 gate = 1
+#             elif self.affinef == 3:
+#                 gate, scale, shift = params.chunk(chunks=3, dim=1)
+#             x = self.act1(torch.addcmul(shift, self.norm1(x), scale + 1))
+
+
+#             x = self.conv1(F.dropout(x, p=self.dropout, training=self.training))
+
+#             x = (gate*x).add_(self.skip(orig) if self.skip is not None else orig)
+#             x = x * self.skip_scale
+
+#         elif self.blockconfig == 1:
+#             orig = x
+
+#             params = self.affine(emb).unsqueeze(2).unsqueeze(3).to(x.dtype)
+#             if self.affinef == 2:
+#                 scale, shift = params.chunk(chunks=2, dim=1)
+#                 gate = 1
+#             elif self.affinef == 3:
+#                 gate, scale, shift = params.chunk(chunks=3, dim=1)
+#             x = self.conv0(self.act0(torch.addcmul(shift, self.norm0(x), scale + 1)))
+            
+#             x = self.act1(self.norm1(x))
+        
+#             x = self.conv1(F.dropout(x, p=self.dropout, training=self.training))
+#             x = (gate*x).add_(self.skip(orig) if self.skip is not None else orig)
+#             x = x * self.skip_scale
+#         else:
+#             raise NotImplementedError()
+#         return x
 
 class UNetBlock(torch.nn.Module):
     def __init__(self,
@@ -485,12 +576,11 @@ class UNetBlock(torch.nn.Module):
         else:
             raise NotImplementedError()
         return x
-    
 
 class U_Block(nn.Module):
     def __init__(self, input_size, hidden_size, input_chans=None, **kwargs):
         super().__init__()
-        self.conv = PolicyUNetBlock(input_chans if input_chans else hidden_size, hidden_size, emb_channels=hidden_size, **kwargs)
+        self.conv = UNetBlock(input_chans if input_chans else hidden_size, hidden_size, emb_channels=hidden_size, **kwargs)
 
     def forward(self, x, c):
         return self.conv(x, c)
@@ -769,7 +859,7 @@ def DiC_B(**kwargs):
     return DiC_default(depth=[6,6,5,6,6], hidden_size=192, **kwargs)
 
 def DiC_S(**kwargs):
-    return DiC_default(depth=[1,1,1,1,1], hidden_size=96, **kwargs)
+    return DiC_default(depth=[2,2,2,2,2], hidden_size=96, **kwargs)
 
 DiC_models = {
     'DiC-S': DiC_S,
@@ -785,6 +875,7 @@ if __name__=="__main__":
 
 
     model = DiC_S()
+
     # model.load_state_dict(torch.load('path/to/weight', map_location='cpu'))
 
     model.cuda()
@@ -793,13 +884,12 @@ if __name__=="__main__":
     inputs = torch.rand(64, 8, 8).cuda()
     t = torch.ones(1).int().cuda()
     y = torch.rand(64, 2, 1032).cuda()
+    import time
     
     model(inputs, t, y)
-    import time
     start = time.time()
     out = model(inputs, t, y)
     print(time.time() - start)
-
     flops = profile_macs(model, (inputs, t, y))
     print(f'FLOPS: {flops/1e9:.2f} G')
 
