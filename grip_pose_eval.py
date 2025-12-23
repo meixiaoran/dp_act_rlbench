@@ -242,7 +242,7 @@ def main(checkpoint, ckpt_name0, device, task_name, robot_name, epochs=50, onscr
                     last_qpos = qpos_list[-2]
                     second_last_qpos = qpos_list[-3]
 
-                    [observation['wrist'], second_last_image['wrist'][np.newaxis, ...]], axis=0)
+                    [observation['wrist'], second_last_image['wrist'][np.newaxis, ...]], axis=0
                     observation['wrist'] = np.concatenate([observation['wrist'], last_image['wrist'][np.newaxis, ...]],
                                                          axis=0)
 
@@ -384,10 +384,10 @@ def main(checkpoint, ckpt_name0, device, task_name, robot_name, epochs=50, onscr
 
 # %%
 if __name__ == '__main__':
-    ckpt_dir = "/home/mar/diffusion_policy/4800.ckpt"
+    ckpt_dir = "/home/mar/dp_act_rlbench/data/outputs/2025.12.11/15.33.11_train_diffusion_transformer_hybrid_reach_target/checkpoints/300.ckpt"
     checkpoint = ckpt_dir
     ckpt_name0 = "latest.ckpt"
-    task_name = "close_laptop_lid"
+    task_name = "put_rubbish_in_bin"
     robot_name = "panda"
     device = "cuda:0"
     main(checkpoint, ckpt_name0, device, task_name, robot_name, epochs=100, onscreen_render=True, variation=0)

@@ -78,8 +78,8 @@ dataloader:
   persistent_workers: False      # 是否使用持久工作进程，`False` 表示训练期间不会保持工作进程。
 
 val_dataloader:
-  batch_size: 8                 # 每个验证批次的样本数，设置为64。
-  num_workers: 4                 # 验证时使用的工作进程数。
+  batch_size: 64                 # 每个验证批次的样本数，设置为64。
+  num_workers: 8                 # 验证时使用的工作进程数。
   shuffle: False                 # 是否对验证数据进行打乱，通常不对验证数据打乱。
   pin_memory: True               # 是否将验证数据加载到GPU内存中。
   persistent_workers: False      # 是否使用持久工作进程，验证时通常不需要保持工作进程。
@@ -102,7 +102,7 @@ training:
   # optimization
   lr_scheduler: cosine           # 学习率调度器类型，使用余弦退火调度器（cosine decay）。
   lr_warmup_steps: 1000           # 学习率预热步骤数，设置为1000步，逐渐增加学习率。
-  num_epochs: 3000                # 训练的总epoch数，设置为3050个训练周期。
+  num_epochs: 1000                # 训练的总epoch数，设置为3050个训练周期。
   gradient_accumulate_every: 1    # 每1个步数进行一次梯度累积，通常用于处理大batch训练时显存不足的情况。
   # EMA销毁性能问题
   use_ema: True                   # 是否使用EMA来平滑模型权重，`True`表示使用，`False`则不使用。

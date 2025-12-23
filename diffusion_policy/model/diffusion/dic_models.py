@@ -619,7 +619,7 @@ DiC_models = {
 
 
 if __name__=="__main__":
-    from torchprofile import profile_macs
+
     import warnings
 
 
@@ -635,9 +635,6 @@ if __name__=="__main__":
     
     model(inputs, t, y)
     out = model(inputs, t, y)
-
-    flops = profile_macs(model, (inputs, t, y))
-    print(f'FLOPS: {flops/1e9:.2f} G')
 
     params = 0
     for P in model.parameters():

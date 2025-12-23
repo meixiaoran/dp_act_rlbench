@@ -139,7 +139,7 @@ class TrainDiffusionTransformerHybridWorkspace(BaseWorkspace):
 
         # Initialize SwanLab experiment
         swanlab_run = swanlab.init(
-            project="dic",  # Specify your SwanLab project name
+            project="dp_raw",  # Specify your SwanLab project name
             config=OmegaConf.to_container(cfg, resolve=True),  # Convert config to dictionary
         )
 
@@ -196,8 +196,11 @@ class TrainDiffusionTransformerHybridWorkspace(BaseWorkspace):
                         # 将当前批次的数据转移到指定设备（CPU 或 GPU）
                         batch = dict_apply(batch, lambda x: x.to(device, non_blocking=True))
 
-                        if train_sampling_batch is None:
-                            train_sampling_batch = batch  # 保存第一批数据用于后续采样
+                        if batch['obs']['wrist'].shape[0] != cfg.dataloader.batch_size:
+                            # 跳过最后一个不完整的批次
+                            continue 
+                        # if train_sampling_batch is None:
+                        #     train_sampling_batch = batch  # 保存第一批数据用于后续采样
 
                         # 计算损失
                         raw_loss = self.model.compute_loss(batch)  # 调用模型的 compute_loss 方法计算当前批次的损失
