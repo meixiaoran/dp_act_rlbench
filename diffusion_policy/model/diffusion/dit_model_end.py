@@ -165,6 +165,21 @@ class LatentActionEncoder(nn.Module):
         self.mu_head = nn.Linear(hidden_dim, latent_dim * 4)
         if use_kl:
             self.logvar_head = nn.Linear(hidden_dim, latent_dim * 4)
+        
+        self.initialize_weights()
+
+    def initialize_weights(self):
+        """初始化网络权重"""
+        for module in self.modules():
+            if isinstance(module, nn.Linear):
+                # Xavier初始化
+                nn.init.xavier_uniform_(module.weight)
+                if module.bias is not None:
+                    nn.init.constant_(module.bias, 0)
+            elif isinstance(module, nn.LayerNorm):
+                # LayerNorm通常使用默认初始化即可，但也可以明确初始化
+                nn.init.constant_(module.weight, 1.0)
+                nn.init.constant_(module.bias, 0)
 
     def forward(self, actions):
         """
@@ -219,6 +234,20 @@ class LatentActionDecoder(nn.Module):
 
             nn.Linear(hidden_dim, action_dim),
         )
+        self.initialize_weights()
+
+    def initialize_weights(self):
+        """初始化网络权重"""
+        for module in self.modules():
+            if isinstance(module, nn.Linear):
+                # Xavier初始化
+                nn.init.xavier_uniform_(module.weight)
+                if module.bias is not None:
+                    nn.init.constant_(module.bias, 0)
+            elif isinstance(module, nn.LayerNorm):
+                # LayerNorm通常使用默认初始化即可，但也可以明确初始化
+                nn.init.constant_(module.weight, 1.0)
+                nn.init.constant_(module.bias, 0)
 
     def forward(self, z):
         """
@@ -266,10 +295,7 @@ class DiT(nn.Module):
         self.patch_size = patch_size
         self.num_heads = num_heads
 
-        self.encode = LatentActionEncoder(input_size, 4 * input_size)
-        self.decode = LatentActionDecoder(4 * input_size)
-
-        self.x_embedder = PatchEmbed(4 * input_size, patch_size, in_channels, hidden_size, bias=True)
+        self.x_embedder = PatchEmbed(input_size * 4, patch_size, in_channels, hidden_size, bias=True)
         self.t_embedder = TimestepEmbedder(hidden_size)
         self.y_embedder = LabelEmbedder(num_classes, hidden_size, class_dropout_prob)
         num_patches = self.x_embedder.num_patches
@@ -401,9 +427,6 @@ class DiT(nn.Module):
         """
         t = t.view(-1)
         t = t.to("cuda:0")
-        x, kl = self.encode(x)
-        latent_action_raw = x
-
         x = x.unsqueeze(1) # (N, in_channels, H, W)
         x = self.x_embedder(x) + self.pos_embed  # (N, T, D), where T = H * W / patch_size ** 2
         t = self.t_embedder(t)                  # (N, D)
@@ -415,10 +438,7 @@ class DiT(nn.Module):
         x = self.final_layer(x, c)                # (N, T, patch_size ** 2 * out_channels)
         x = self.unpatchify(x)                   # (N, out_channels, H, W)
         x = x.mean(dim=1)
-        latent_action_pred = x
-
-        x = self.decode(x)
-        return x, latent_action_raw, latent_action_pred
+        return x
 
     def forward_with_cfg(self, x, t, y, cfg_scale):
         """

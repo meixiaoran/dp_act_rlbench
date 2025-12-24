@@ -14,7 +14,7 @@ from diffusion_policy.model.vision.model_getter import get_resnet
 from diffusion_policy.model.diffusion.udit_models import U_DiT_DP
 from diffusion_policy.model.diffusion.dic_models import DiC_S
 from diffusion_policy.model.diffusion.dic_model_B import DiC_B
-from diffusion_policy.model.diffusion.dit_model_end import DiT_B_4, DiT_S_4, LatentActionEncoder, LatentActionDecoder
+from diffusion_policy.model.diffusion.dit_model import DiT_B_4, DiT_S_4
 from diffusion_policy.model.diffusion.j_dit import JiT_B_16
 
 from diffusion_policy.common.pytorch_util import dict_apply, replace_submodules
@@ -107,14 +107,11 @@ class DiffusionTransformerHybridImagePolicy(BaseImagePolicy):
         #     n_cond_layers=n_cond_layers
         # )
         # model = DiC_S()
-
-        latent_action_encode = LatentActionEncoder(8, 4 * 8)
-        latent_action_decode = LatentActionDecoder(4 * 8)
-
         model = DiT_S_4()
+
+
         self.model = nn.ModuleDict({
-            'latent_action_encode': latent_action_encode,
-            'latent_action_decode': latent_action_decode,
+            
             'obs_encoder': obs_encoder,
             'model': model
         })
@@ -276,55 +273,6 @@ class DiffusionTransformerHybridImagePolicy(BaseImagePolicy):
     #         optim_groups, lr=learning_rate, betas=betas
     #     )
     #     return optimizer
-    def compute_latent_diffusion_loss(
-            self,
-            action_raw,                # (B, T, A)
-            latent_action_raw,         # (B, T, D)
-            noised_latent_action,      # (B, T, D)
-            latent_action_pred,        # (B, T, D)
-            pred_action,               # (B, T, A)
-            loss_mask=None,            # (B, T) optional
-            lambda_smooth=0.1,
-            lambda_recon=0.1,
-            lambda_var=0.1,
-            sigma_min=0.05
-        ):
-        """
-        Compute the combined loss for latent diffusion policy.
-        """
-
-        # 1️⃣ Diffusion loss in latent space
-        loss_diff = F.mse_loss(latent_action_pred, latent_action_raw, reduction='none')  # (B, T, D)
-        
-        loss_diff = loss_diff.mean()
-
-        # 2️⃣ Temporal smoothness on latent
-        loss_smooth = ((latent_action_pred[:, 1:] - latent_action_pred[:, :-1]) ** 2).mean()
-
-        # 3️⃣ Reconstruction loss in action space
-        loss_recon = F.mse_loss(pred_action, action_raw, reduction='none')
-        if loss_mask is not None:
-            loss_mask = loss_mask.type(loss_recon.dtype)
-            loss_recon = loss_recon * loss_mask
-        loss_recon = loss_recon.mean()
-
-        # 4️⃣ Latent variance / isotropy loss (prevent collapse)
-        latent_std = latent_action_pred.std(dim=(0,1))  # over batch and time
-        loss_var = torch.sum(F.relu(sigma_min - latent_std))
-        
-        # 5️⃣ Combine losses
-        loss = loss_diff \
-            + lambda_smooth * loss_smooth \
-            + lambda_recon * loss_recon \
-            + lambda_var * loss_var
-
-        return loss, {
-            "loss_diff": loss_diff.item(),
-            "loss_smooth": loss_smooth.item(),
-            "loss_recon": loss_recon.item(),
-            "loss_var": loss_var.item()
-        }
-
 
     def compute_loss(self, batch):
         # normalize input
@@ -362,12 +310,7 @@ class DiffusionTransformerHybridImagePolicy(BaseImagePolicy):
             condition_mask = torch.zeros_like(trajectory, dtype=torch.bool)
         else:
             condition_mask = self.mask_generator(trajectory.shape)
-        
-        action_raw = trajectory
 
-        trajectory, k1 = self.model['latent_action_encode'](trajectory)
-
-        latent_action_raw = trajectory
         # Sample noise that we'll add to the images
         noise = torch.randn(trajectory.shape, device=trajectory.device)
         bsz = trajectory.shape[0]
@@ -380,31 +323,19 @@ class DiffusionTransformerHybridImagePolicy(BaseImagePolicy):
         # (this is the forward diffusion process)
         noisy_trajectory = self.noise_scheduler.add_noise(
             trajectory, noise, timesteps)
-        noised_latent_action = noisy_trajectory
 
         # compute loss mask
         loss_mask = ~condition_mask
 
         # apply conditioning
-        # noisy_trajectory[condition_mask] = trajectory[condition_mask]
+        noisy_trajectory[condition_mask] = trajectory[condition_mask]
 
         # Predict the noise residual
-        latent_action_pred = self.model['model'](noisy_trajectory, timesteps, cond)
-        
-        pred_action = self.model['latent_action_decode'](latent_action_pred)
-
-
-
-        loss, loss_list = self.compute_latent_diffusion_loss(
-        action_raw,
-        latent_action_raw,
-        noised_latent_action,
-        latent_action_pred,
-        pred_action,
-        loss_mask
-        )
-
-        
+        pred, latent_action_raw, latent_action_pred = self.model['model'](noisy_trajectory, timesteps, cond)
+        loss = F.mse_loss(pred, noise, reduction='none')
+        loss = loss * loss_mask.type(loss.dtype)
+        loss = reduce(loss, 'b ... -> b (...)', 'mean')
+        loss = loss.mean()
         return loss
 
 
