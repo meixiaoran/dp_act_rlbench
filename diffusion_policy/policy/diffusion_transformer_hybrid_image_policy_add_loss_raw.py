@@ -14,7 +14,7 @@ from diffusion_policy.model.vision.model_getter import get_resnet
 from diffusion_policy.model.diffusion.udit_models import U_DiT_DP
 from diffusion_policy.model.diffusion.dic_models import DiC_S
 from diffusion_policy.model.diffusion.dic_model_B import DiC_B
-from diffusion_policy.model.diffusion.dit_model_raw import DiT_B_4, DiT_S_4
+from diffusion_policy.model.diffusion.dit_model import DiT_B_4, DiT_S_4
 from diffusion_policy.model.diffusion.j_dit import JiT_B_16
 
 from diffusion_policy.common.pytorch_util import dict_apply, replace_submodules
@@ -108,7 +108,10 @@ class DiffusionTransformerHybridImagePolicy(BaseImagePolicy):
         # )
         # model = DiC_S()
         model = DiT_S_4()
+
+
         self.model = nn.ModuleDict({
+            
             'obs_encoder': obs_encoder,
             'model': model
         })
@@ -166,7 +169,7 @@ class DiffusionTransformerHybridImagePolicy(BaseImagePolicy):
             # t = t.view(-1)  # 变成 shape (1,)
             # t = t.to('cuda:0')
             
-            model_output = model['model'](trajectory, t, cond)
+            model_output, latent_action_raw, latent_action_pred = model['model'](trajectory, t, cond)
             # 3. compute previous image: x_t -> x_t-1
             trajectory = scheduler.step(
                 model_output, t, trajectory,
@@ -178,52 +181,6 @@ class DiffusionTransformerHybridImagePolicy(BaseImagePolicy):
         trajectory[condition_mask] = condition_data[condition_mask]
 
         return trajectory
-    
-    def _t_cont_to_index(self, t_cont: torch.Tensor) -> torch.Tensor:
-        # t_cont: (B,) in [0, 1]
-        # 复用原 scheduler 的 num_train_timesteps 作为 embedding 分辨率
-        N = self.noise_scheduler.config.num_train_timesteps
-        t_idx = torch.clamp((t_cont * (N - 1)).round().long(), 0, N - 1)
-        return t_idx
-
-
-    @torch.no_grad()
-    def conditional_sample_flow(self,
-                                condition_data, condition_mask,
-                                cond=None, generator=None,
-                                method="euler",
-                                **kwargs):
-        model = self.model['model']
-
-        x = torch.randn(
-            size=condition_data.shape,
-            dtype=condition_data.dtype,
-            device=condition_data.device,
-            generator=generator
-        )
-
-        B = x.shape[0]
-        steps = self.num_inference_steps
-        dt = 1.0 / steps
-
-        for i in range(steps):
-            # 连续时间 t in [0,1)
-            t_cont = torch.full((B,), i / steps, device=x.device, dtype=torch.float32)
-            t_idx = self._t_cont_to_index(t_cont)
-
-            # 1) enforce conditioning
-            x[condition_mask] = condition_data[condition_mask]
-
-            # 2) predict velocity
-            v = model(x, t_idx, cond)  # v_theta
-
-            # 3) ODE step
-            x = x + dt * v
-
-        # finally enforce conditioning
-        x[condition_mask] = condition_data[condition_mask]
-        return x
-
 
     def predict_action(self, obs_dict: Dict[str, torch.Tensor]) -> Dict[str, torch.Tensor]:
         """
@@ -271,7 +228,7 @@ class DiffusionTransformerHybridImagePolicy(BaseImagePolicy):
             cond_mask[:, :To, Da:] = True
 
         # run sampling
-        nsample = self.conditional_sample_flow(
+        nsample = self.conditional_sample(
             cond_data,
             cond_mask,
             cond=cond,
@@ -317,63 +274,102 @@ class DiffusionTransformerHybridImagePolicy(BaseImagePolicy):
     #     )
     #     return optimizer
 
-    def compute_loss_flow(self, batch):
+    def compute_loss(self, batch):
+        # normalize input
         assert 'valid_mask' not in batch
         nobs = self.normalizer.normalize(batch['obs'])
         nactions = self.normalizer['action'].normalize(batch['action'])
-
         batch_size = nactions.shape[0]
         horizon = nactions.shape[1]
         To = self.n_obs_steps
 
+        # handle different ways of passing observation
         cond = None
-        trajectory = nactions  # x1
-
+        trajectory = nactions
         if self.obs_as_cond:
-            this_nobs = dict_apply(nobs, lambda x: x[:, :To, ...].reshape(-1, *x.shape[2:]))
+            # reshape B, T, ... to B*T
+            this_nobs = dict_apply(nobs,
+                                   lambda x: x[:, :To, ...].reshape(-1, *x.shape[2:]))
             nobs_features = self.model['obs_encoder'](this_nobs)
+            # reshape back to B, T, Do
             cond = nobs_features.reshape(batch_size, To, -1)
-
             if self.pred_action_steps_only:
                 start = To - 1
                 end = start + self.n_action_steps
-                trajectory = nactions[:, start:end]  # x1
+                trajectory = nactions[:, start:end]
         else:
+            # reshape B, T, ... to B*T
             this_nobs = dict_apply(nobs, lambda x: x.reshape(-1, *x.shape[2:]))
             nobs_features = self.model['obs_encoder'](this_nobs)
+            # reshape back to B, T, Do
             nobs_features = nobs_features.reshape(batch_size, horizon, -1)
-            trajectory = torch.cat([nactions, nobs_features], dim=-1).detach()  # x1
+            trajectory = torch.cat([nactions, nobs_features], dim=-1).detach()
 
-        # condition mask
+        # generate impainting mask
         if self.pred_action_steps_only:
             condition_mask = torch.zeros_like(trajectory, dtype=torch.bool)
         else:
             condition_mask = self.mask_generator(trajectory.shape)
 
-        loss_mask = ~condition_mask  # only train on unknown parts
+        # Sample noise that we'll add to the images
+        noise = torch.randn(trajectory.shape, device=trajectory.device)
+        bsz = trajectory.shape[0]
+        # Sample a random timestep for each image
+        timesteps = torch.randint(
+            0, self.noise_scheduler.config.num_train_timesteps,
+            (bsz,), device=trajectory.device
+        ).long()
+        # Add noise to the clean images according to the noise magnitude at each timestep
+        # (this is the forward diffusion process)
+        noisy_trajectory = self.noise_scheduler.add_noise(
+            trajectory, noise, timesteps)
 
-        # Flow Matching endpoints
-        x1 = trajectory
-        x0 = torch.randn_like(x1)  # noise endpoint
+        # compute loss mask
+        loss_mask = ~condition_mask
 
-        # sample continuous t ~ U(0,1)
-        t_cont = torch.rand((batch_size,), device=x1.device, dtype=torch.float32)
-        t_view = t_cont.view(batch_size, *([1] * (x1.ndim - 1)))  # broadcast to (B,1,1,...)
+        # apply conditioning
+        noisy_trajectory[condition_mask] = trajectory[condition_mask]
 
-        # interpolate
-        xt = (1.0 - t_view) * x0 + t_view * x1
+        # Predict the noise residual
+        # pred, latent_action_raw, latent_action_pred = self.model['model'](noisy_trajectory, timesteps, cond)
+        # loss = F.mse_loss(pred, noise, reduction='none')
+        # loss = loss * loss_mask.type(loss.dtype)
+        # loss = reduce(loss, 'b ... -> b (...)', 'mean')
+        # loss = loss.mean()
+        # return loss
 
-        # apply conditioning (inpainting)
-        xt[condition_mask] = x1[condition_mask]
 
-        # target velocity
-        target_v = (x1 - x0)
+        pred, latent_action_raw, latent_action_pred = self.model['model'](noisy_trajectory, timesteps, cond)
 
-        # model predicts velocity
-        t_idx = self._t_cont_to_index(t_cont)  # integer timesteps for embedding reuse
-        pred_v = self.model['model'](xt, t_idx, cond)
+        # 1️⃣ Diffusion MSE loss
+        loss_diff = F.mse_loss(pred, noise, reduction='none')       # (B, T, A)
+        loss_diff = loss_diff * loss_mask.type(loss_diff.dtype)
+        loss_diff = reduce(loss_diff, 'b ... -> b (...)', 'mean')
+        loss_diff = loss_diff.mean()
 
-        loss = F.mse_loss(pred_v, target_v, reduction='none')
-        loss = loss * loss_mask.type(loss.dtype)
-        loss = reduce(loss, 'b ... -> b (...)', 'mean').mean()
+        # 2️⃣ Temporal smoothness on latent
+        # latent_action_pred shape: (B, T, D)
+        loss_smooth = ((latent_action_pred[:, 1:] - latent_action_pred[:, :-1]) ** 2).mean()
+
+        # 3️⃣ Optional: latent reconstruction loss
+        # latent_action_raw: encoder output, latent_action_pred: DiT output (denoised)
+        loss_recon = ((latent_action_pred - latent_action_raw) ** 2).mean()
+
+        # 4️⃣ Optional: latent variance / isotropy loss
+        # Encourage each latent dimension to have sufficient std
+        latent_std = latent_action_pred.std(dim=(0,1))   # over batch and time
+        sigma_min = 0.05
+        loss_var = torch.sum(F.relu(sigma_min - latent_std))
+
+        # 5️⃣ Combine
+        lambda_smooth = 0.1
+        lambda_recon = 0.1
+        lambda_var = 0.1
+
+        loss = loss_diff \
+            + lambda_smooth * loss_smooth \
+            + lambda_recon * loss_recon \
+            + lambda_var * loss_var
+
         return loss
+
